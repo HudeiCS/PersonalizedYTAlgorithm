@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Secrets — never commit.
+# Broad match with an explicit exception for the committed template.
+.env
+.env.*
+!.env.example
+
+# Runtime token store — holds live Google access/refresh tokens
+yt-discover/backend/db/data.json
+
+# Build output
+dist/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / OS / tool-local state
+.DS_Store
+.claude/settings.local.json
