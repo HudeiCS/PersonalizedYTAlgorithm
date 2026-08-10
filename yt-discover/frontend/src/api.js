@@ -29,4 +29,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ genres, discoverability }),
     }),
+  feedback: (videoId, channelId, features, label) =>
+    request("/api/feedback", {
+      method: "POST",
+      body: JSON.stringify({ videoId, channelId, features, label }),
+    }),
 };

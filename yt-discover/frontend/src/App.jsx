@@ -15,6 +15,7 @@ export default function App() {
   const [error, setError] = useState(null);
   const [authNotice, setAuthNotice] = useState(null);
   const [poolMeta, setPoolMeta] = useState(null);
+  const [feedbackGiven, setFeedbackGiven] = useState({}); // videoId -> "liked" | "dismissed"
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -50,12 +51,31 @@ export default function App() {
       if (user) api.savePreferences(genres, discoverability).catch(() => {});
       const data = await api.recommendations(genres, discoverability);
       setResults(data.results);
-      setPoolMeta({ usedSubscriptions: data.usedSubscriptions, size: data.candidatePoolSize });
+      setPoolMeta({
+        usedSubscriptions: data.usedSubscriptions,
+        size: data.candidatePoolSize,
+        usingLearnedWeights: data.usingLearnedWeights,
+      });
     } catch (err) {
       setError(err.message);
       setResults(null);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleFeedback(videoId, channelId, features, label) {
+    // Optimistic update: mark it given right away so the buttons disable
+    // instantly, then roll back only if the request actually fails.
+    setFeedbackGiven((prev) => ({ ...prev, [videoId]: label === 1 ? "liked" : "dismissed" }));
+    try {
+      await api.feedback(videoId, channelId, features, label);
+    } catch (err) {
+      setFeedbackGiven((prev) => {
+        const next = { ...prev };
+        delete next[videoId];
+        return next;
+      });
     }
   }
 
@@ -126,7 +146,12 @@ export default function App() {
             ) : (
               <div className="grid">
                 {results.map((r) => (
-                  <CreatorCard key={r.video.id} result={r} />
+                  <CreatorCard
+                    key={r.video.id}
+                    result={r}
+                    feedbackState={feedbackGiven[r.video.id]}
+                    onFeedback={handleFeedback}
+                  />
                 ))}
               </div>
             )}
@@ -134,7 +159,12 @@ export default function App() {
         )}
 
         <div className="footer-note">
-          scoring = 0.45 × topic-match + 0.15 × engagement + 0.10 × freshness + 0.30 × discoverability<br />
+          {poolMeta?.usingLearnedWeights ? (
+            <>scoring uses weights learned from your like/dismiss feedback, blending the same four
+            signals below in proportions the model found rather than ones set by hand.<br /></>
+          ) : (
+            <>scoring = 0.45 × topic-match + 0.15 × engagement + 0.10 × freshness + 0.30 × discoverability<br /></>
+          )}
           topic-match is cosine similarity between your typed genres/subscriptions and each candidate's
           title, description, tags and channel bio. discoverability weights small/unsubscribed
           channels higher as you move the slider right.

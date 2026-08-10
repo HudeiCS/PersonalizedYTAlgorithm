@@ -22,6 +22,35 @@
  *   4. Roll video-level scores up to channel-level, dedupe, sort, explain.
  */
 
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import { predict } from "../ml/logisticRegression.js";
+import { FEATURE_ORDER } from "../ml/features.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const LEARNED_WEIGHTS_PATH = path.join(__dirname, "..", "db", "learnedWeights.json");
+
+/** Reads db/learnedWeights.json if trainWeights.js has produced one, else
+ *  null — the signal rankCandidates() uses to decide whether to score with
+ *  learned weights or fall back to the original hand-picked blend. */
+function loadLearnedWeights() {
+  try {
+    if (!fs.existsSync(LEARNED_WEIGHTS_PATH)) return null;
+    const parsed = JSON.parse(fs.readFileSync(LEARNED_WEIGHTS_PATH, "utf-8"));
+    if (!parsed?.weights || typeof parsed.bias !== "number") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Exposed so routes/recommendations.js can tell the frontend which
+ *  scoring mode is actually in effect for this request. */
+export function hasLearnedWeights() {
+  return loadLearnedWeights() !== null;
+}
+
 const STOPWORDS = new Set([
   "the","a","an","and","or","but","of","to","in","on","for","with","is",
   "this","that","it","its","as","at","by","be","are","was","were","from",
@@ -126,6 +155,12 @@ export function rankCandidates({
   channelDetailsById,
   discoverability = 0.6,
 }) {
+  // Loaded once per call, not once per candidate — this file only changes
+  // when trainWeights.js reruns, so re-reading it 20+ times per request
+  // would be pure waste.
+  const learned = loadLearnedWeights();
+  const learnedWeightsArray = learned ? FEATURE_ORDER.map((key) => learned.weights[key]) : null;
+
   const scored = candidateVideos.map((video) => {
     const vDetails = videoDetailsById.get(video.videoId);
     const cDetails = channelDetailsById.get(video.channelId);
@@ -151,20 +186,24 @@ export function rankCandidates({
       discoverability
     );
 
-    // Weighted blend. Topic match dominates (it's the whole point), engagement
-    // and freshness are tie-breakers, discoverability actively reshapes ranking
-    // rather than just nudging it.
-    const score =
-      0.45 * topicMatch +
-      0.15 * engagement +
-      0.1 * freshness +
-      0.3 * discover;
+    const breakdown = { topicMatch, engagement, freshness, discover };
+
+    // Learned weights (when available) replace the hand-picked blend
+    // entirely, using the exact same four features — only where the
+    // weights came from changes. predict() is sigmoid(w·x + b), and
+    // sigmoid is monotonic, so ranking by its output produces the same
+    // order as ranking by the raw weighted sum would; the fallback blend
+    // below is that same shape without the sigmoid, weights chosen by
+    // hand instead of trained on real feedback.
+    const score = learned
+      ? predict(learnedWeightsArray, learned.bias, FEATURE_ORDER.map((key) => breakdown[key]))
+      : 0.45 * topicMatch + 0.15 * engagement + 0.1 * freshness + 0.3 * discover;
 
     return {
       video,
       channel: cDetails,
       score,
-      breakdown: { topicMatch, engagement, freshness, discover },
+      breakdown,
     };
   });
 
