@@ -1,12 +1,13 @@
 import { Router } from "express";
 import { getUser, setPreferences } from "../db/store.js";
+import { recordFeedback } from "../db/feedback.js";
 import {
   fetchSubscriptions,
   enrichChannels,
   searchByTopic,
   fetchVideoDetails,
 } from "../services/youtubeService.js";
-import { buildTasteProfile, rankCandidates, explain } from "../services/recommendationEngine.js";
+import { buildTasteProfile, rankCandidates, explain, hasLearnedWeights } from "../services/recommendationEngine.js";
 
 const router = Router();
 
@@ -104,13 +105,40 @@ router.post("/recommendations", async (req, res) => {
       score: Math.round(entry.score * 1000) / 1000,
       reason: explain(entry),
       alreadySubscribed: profile.subscribedChannelIds.has(entry.video.channelId),
+      // The exact feature vector the model used for this video. The frontend
+      // sends this straight back on /feedback so the stored training example
+      // matches what the model actually saw — never recomputed after the fact.
+      features: entry.breakdown,
     }));
 
-    res.json({ results, usedSubscriptions: signedIn, candidatePoolSize: candidateVideos.length });
+    res.json({
+      results,
+      usedSubscriptions: signedIn,
+      candidatePoolSize: candidateVideos.length,
+      usingLearnedWeights: hasLearnedWeights(),
+    });
   } catch (err) {
     console.error(err);
     res.status(502).json({ error: "recommendation pipeline failed — check API quota / key" });
   }
+});
+
+/**
+ * Records feedback on one recommendation — the labeled training data.
+ * Body: { videoId, channelId, features: {topicMatch, engagement, freshness, discover}, label: 1|0 }
+ * `features` must be the exact object /recommendations returned for that
+ * video; `label` is 1 for liked/clicked, 0 for dismissed.
+ */
+router.post("/feedback", (req, res) => {
+  const { videoId, channelId, features, label } = req.body;
+
+  if (!videoId || !features || (label !== 0 && label !== 1)) {
+    return res.status(400).json({ error: "need videoId, features, and label (0 or 1)" });
+  }
+
+  const userId = req.session.userId ?? null;
+  const totalEvents = recordFeedback({ userId, videoId, channelId, features, label });
+  res.json({ recorded: true, totalEvents });
 });
 
 function dedupeBy(arr, keyFn) {

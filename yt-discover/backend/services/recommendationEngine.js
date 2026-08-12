@@ -22,6 +22,35 @@
  *   4. Roll video-level scores up to channel-level, dedupe, sort, explain.
  */
 
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import { predict } from "../ml/logisticRegression.js";
+import { FEATURE_ORDER } from "../ml/features.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const LEARNED_WEIGHTS_PATH = path.join(__dirname, "..", "db", "learnedWeights.json");
+
+/** Reads db/learnedWeights.json if trainWeights.js has produced one, else
+ *  null — the signal rankCandidates() uses to decide whether to score with
+ *  learned weights or fall back to the original hand-picked blend. */
+function loadLearnedWeights() {
+  try {
+    if (!fs.existsSync(LEARNED_WEIGHTS_PATH)) return null;
+    const parsed = JSON.parse(fs.readFileSync(LEARNED_WEIGHTS_PATH, "utf-8"));
+    if (!parsed?.weights || typeof parsed.bias !== "number") return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Exposed so routes/recommendations.js can tell the frontend which
+ *  scoring mode is actually in effect for this request. */
+export function hasLearnedWeights() {
+  return loadLearnedWeights() !== null;
+}
+
 const STOPWORDS = new Set([
   "the","a","an","and","or","but","of","to","in","on","for","with","is",
   "this","that","it","its","as","at","by","be","are","was","were","from",
@@ -91,12 +120,36 @@ function freshnessScore(publishedAt) {
   return Math.pow(0.5, ageDays / 45);
 }
 
-function engagementScore(stats) {
-  const views = Number(stats?.viewCount || 0);
-  const likes = Number(stats?.likeCount || 0);
+/** @param videoStats   this video's statistics (views, likes)
+ *  @param channelStats the video's channel's own statistics (viewCount,
+ *         videoCount) — used to judge this video against that channel's own
+ *         typical performance, not a fixed global curve. A small channel's
+ *         best video and a mega-channel's best video should both be able to
+ *         score near 1 here; only measuring against a global view count
+ *         would structurally favor the mega-channel every time. */
+function engagementScore(videoStats, channelStats) {
+  const views = Number(videoStats?.viewCount || 0);
+  const likes = Number(videoStats?.likeCount || 0);
   if (views === 0) return 0;
   const likeRatio = Math.min(likes / views, 0.15) / 0.15; // normalize, cap outliers
-  const viewScore = Math.min(Math.log10(views + 1) / 7, 1); // log-scale views, cap ~10M
+
+  const channelTotalViews = Number(channelStats?.viewCount || 0);
+  const channelVideoCount = Number(channelStats?.videoCount || 0);
+  const channelAvgViews = channelVideoCount > 0 ? channelTotalViews / channelVideoCount : 0;
+
+  let viewScore;
+  if (channelAvgViews > 0) {
+    // ratio to the channel's own average video: 0 far below average,
+    // 0.5 exactly at average, approaching 1 well above average. No fixed
+    // cap needed — it saturates smoothly instead of hard-clipping.
+    const ratio = views / channelAvgViews;
+    viewScore = ratio / (ratio + 1);
+  } else {
+    // No channel baseline available (missing/zero videoCount) — fall back
+    // to the old global curve rather than dividing by zero.
+    viewScore = Math.min(Math.log10(views + 1) / 7, 1);
+  }
+
   return 0.6 * viewScore + 0.4 * likeRatio;
 }
 
@@ -126,6 +179,12 @@ export function rankCandidates({
   channelDetailsById,
   discoverability = 0.6,
 }) {
+  // Loaded once per call, not once per candidate — this file only changes
+  // when trainWeights.js reruns, so re-reading it 20+ times per request
+  // would be pure waste.
+  const learned = loadLearnedWeights();
+  const learnedWeightsArray = learned ? FEATURE_ORDER.map((key) => learned.weights[key]) : null;
+
   const scored = candidateVideos.map((video) => {
     const vDetails = videoDetailsById.get(video.videoId);
     const cDetails = channelDetailsById.get(video.channelId);
@@ -142,7 +201,7 @@ export function rankCandidates({
 
     const combinedVec = mergeVectors(videoText, channelText);
     const topicMatch = cosineSimilarity(profile.vector, combinedVec);
-    const engagement = engagementScore(vDetails?.statistics);
+    const engagement = engagementScore(vDetails?.statistics, cDetails?.statistics);
     const freshness = freshnessScore(video.publishedAt);
     const discover = discoverabilityScore(
       cDetails?.statistics?.subscriberCount,
@@ -151,20 +210,24 @@ export function rankCandidates({
       discoverability
     );
 
-    // Weighted blend. Topic match dominates (it's the whole point), engagement
-    // and freshness are tie-breakers, discoverability actively reshapes ranking
-    // rather than just nudging it.
-    const score =
-      0.45 * topicMatch +
-      0.15 * engagement +
-      0.1 * freshness +
-      0.3 * discover;
+    const breakdown = { topicMatch, engagement, freshness, discover };
+
+    // Learned weights (when available) replace the hand-picked blend
+    // entirely, using the exact same four features — only where the
+    // weights came from changes. predict() is sigmoid(w·x + b), and
+    // sigmoid is monotonic, so ranking by its output produces the same
+    // order as ranking by the raw weighted sum would; the fallback blend
+    // below is that same shape without the sigmoid, weights chosen by
+    // hand instead of trained on real feedback.
+    const score = learned
+      ? predict(learnedWeightsArray, learned.bias, FEATURE_ORDER.map((key) => breakdown[key]))
+      : 0.45 * topicMatch + 0.15 * engagement + 0.1 * freshness + 0.3 * discover;
 
     return {
       video,
       channel: cDetails,
       score,
-      breakdown: { topicMatch, engagement, freshness, discover },
+      breakdown,
     };
   });
 

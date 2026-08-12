@@ -355,6 +355,13 @@ button {
   transform: translateY(-2px);
 }
 
+.card-link {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  text-decoration: none;
+}
+
 .thumb-wrap {
   position: relative;
   aspect-ratio: 16 / 9;
@@ -416,6 +423,43 @@ button {
   border-radius: 4px;
   padding: 1px 6px;
   width: fit-content;
+}
+
+/* ---- Feedback (like / dismiss) --------------------------------------
+   This is where y comes from: every click here becomes one labeled
+   training example (features + 1 or 0) in feedback.json.
+------------------------------------------------------------------------- */
+
+.feedback-row {
+  display: flex;
+  border-top: 1px solid var(--border);
+}
+
+.feedback-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 10px 8px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.feedback-btn + .feedback-btn {
+  border-left: 1px solid var(--border);
+}
+.feedback-btn:disabled {
+  cursor: default;
+}
+.feedback-btn.like:hover:not(:disabled) { color: var(--cyan); }
+.feedback-btn.dismiss:hover:not(:disabled) { color: var(--danger); }
+.feedback-btn.like.active {
+  color: var(--cyan);
+  background: rgba(95, 212, 208, 0.08);
+}
+.feedback-btn.dismiss.active {
+  color: var(--danger);
+  background: rgba(224, 108, 108, 0.08);
 }
 
 /* ---- Subscriptions strip -------------------------------------------- */

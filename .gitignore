@@ -10,6 +10,12 @@ node_modules/
 # Runtime token store — holds live Google access/refresh tokens
 yt-discover/backend/db/data.json
 
+# Runtime feedback store — accumulated like/dismiss training data
+yt-discover/backend/db/feedback.json
+
+# Output of scripts/trainWeights.js — regenerate locally, don't commit
+yt-discover/backend/db/learnedWeights.json
+
 # Build output
 dist/
 
