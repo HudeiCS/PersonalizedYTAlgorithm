@@ -105,13 +105,25 @@ export async function searchByTopic(query, { order = "relevance", maxResults = 2
   return videos;
 }
 
-/** Video-level stats (views, likes, tags) for scoring engagement + recency. */
+/** Video-level stats (views, likes, tags) for scoring engagement + recency.
+ *  `videos.list` caps at 50 ids per call, so we chunk — same as
+ *  enrichChannels. Previously this sliced to the first 50 and dropped the
+ *  rest, which silently gave every video past #50 no statistics: they
+ *  scored engagement 0 and lost their tags for topic matching, purely
+ *  because of where they landed in the array. */
 export async function fetchVideoDetails(videoIds) {
   if (videoIds.length === 0) return [];
   const yt = publicClient();
-  const { data } = await yt.videos.list({
-    part: ["snippet", "statistics", "contentDetails"],
-    id: videoIds.slice(0, 50),
-  });
-  return data.items ?? [];
+  const chunks = [];
+  for (let i = 0; i < videoIds.length; i += 50) chunks.push(videoIds.slice(i, i + 50));
+
+  const results = [];
+  for (const chunk of chunks) {
+    const { data } = await yt.videos.list({
+      part: ["snippet", "statistics", "contentDetails"],
+      id: chunk,
+    });
+    results.push(...(data.items ?? []));
+  }
+  return results;
 }

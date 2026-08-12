@@ -9,16 +9,20 @@
  * about and up-weights smaller, high-engagement creators.
  *
  * Pipeline:
- *   1. Build a taste profile (bag-of-terms vector) from subscriptions +
- *      typed genres, with typed genres weighted higher (explicit intent
- *      beats inferred intent).
- *   2. Pull a candidate pool via YouTube topic search for each genre.
+ *   1. Build a taste profile (bag-of-terms vector) from typed genres +
+ *      subscriptions, split by *proportion of total weight* (see
+ *      GENRE_PROFILE_SHARE) rather than a per-term multiplier, so typed
+ *      intent genuinely dominates no matter how many channels a user follows.
+ *   2. Pull a candidate pool via YouTube topic search, one search per typed
+ *      genre. Subscriptions deliberately do not seed searches — see the
+ *      note in routes/recommendations.js.
  *   3. Score every candidate on 4 independent signals, then blend:
  *        - topicMatch      cosine similarity vs. the taste profile
  *        - engagement      views/likes relative to the channel's own scale
  *        - freshness       recency decay so dead channels don't surface
  *        - discoverability inverse-log of subscriber count + "new to you"
- *          bonus, weighted by the user's discoverability slider
+ *          bonus, weighted by the user's discoverability slider, and damped
+ *          for candidates well below the pool's best topicMatch
  *   4. Roll video-level scores up to channel-level, dedupe, sort, explain.
  */
 
@@ -50,6 +54,26 @@ function loadLearnedWeights() {
 export function hasLearnedWeights() {
   return loadLearnedWeights() !== null;
 }
+
+// A candidate needs topicMatch at least this fraction of the BEST topicMatch
+// in the current search's own pool before the discoverability boost applies
+// at full strength; below that it ramps down smoothly.
+//
+// Relative rather than absolute on purpose: topicMatch is bag-of-words
+// cosine similarity, whose natural scale swings a lot per search (a good
+// match might be 0.6 for one query and 0.3 for another), so no fixed
+// threshold means the same thing across searches.
+//
+// Kept deliberately mild. Its job is only to stop a barely-related channel
+// from collecting a full small-creator boost — NOT to separate multi-genre
+// searches, which is a legitimate thing for a user to ask for. Raising it
+// measurably suppresses the relevant small creators this app exists to
+// surface, so it should stay low.
+const RELATIVE_TOPIC_FLOOR_FRACTION = 0.3;
+
+// Share of the taste profile's total weight given to what the user actually
+// typed, with subscriptions splitting the remainder. See buildTasteProfile().
+const GENRE_PROFILE_SHARE = 0.7;
 
 const STOPWORDS = new Set([
   "the","a","an","and","or","but","of","to","in","on","for","with","is",
@@ -98,17 +122,56 @@ function cosineSimilarity(a, b) {
   return dot / (Math.sqrt(magA) * Math.sqrt(magB));
 }
 
-/** Builds the user's taste profile. Explicit genres are weighted 3x a
- *  subscription's own title/description terms — typed intent should
- *  dominate over inferred history, especially for "I want something NEW". */
+/** Rescales a term vector so its weights sum to `targetMass`, preserving the
+ *  relative proportions between its own terms. Used to make a source's
+ *  influence on the taste profile depend on how important that source is —
+ *  not on how many words it happens to contain. */
+function scaleVectorToMass(vec, targetMass) {
+  const total = Object.values(vec).reduce((sum, w) => sum + w, 0);
+  if (total === 0) return {};
+  const factor = targetMass / total;
+  const out = {};
+  for (const [term, weight] of Object.entries(vec)) out[term] = weight * factor;
+  return out;
+}
+
+/**
+ * Builds the user's taste profile.
+ *
+ * Typed genres get GENRE_PROFILE_SHARE of the profile's total weight and
+ * subscriptions split the rest — a *proportional* split, deliberately, not
+ * a per-term multiplier. An earlier version weighted each genre term 3x
+ * each subscription term, which sounds like "typed intent dominates" but
+ * isn't: one typed genre is ~1 term while a subscription list is easily
+ * 100+ terms, so subscriptions ended up as ~98% of the profile and a
+ * search for "minecraft" really meant "channels resembling my
+ * subscriptions." Normalizing per source makes the split hold no matter
+ * how many channels someone follows.
+ *
+ * When only one source is present it takes the whole profile.
+ */
 export function buildTasteProfile({ genres = [], subscriptions = [] }) {
-  const genreVec = termVector(genres, 3);
+  const genreVec = termVector(genres, 1);
   const subVec = termVector(
     subscriptions.flatMap((s) => [s.title, s.description]),
     1
   );
+
+  const hasGenres = Object.keys(genreVec).length > 0;
+  const hasSubs = Object.keys(subVec).length > 0;
+
+  let vector;
+  if (hasGenres && hasSubs) {
+    vector = mergeVectors(
+      scaleVectorToMass(genreVec, GENRE_PROFILE_SHARE),
+      scaleVectorToMass(subVec, 1 - GENRE_PROFILE_SHARE)
+    );
+  } else {
+    vector = hasGenres ? scaleVectorToMass(genreVec, 1) : scaleVectorToMass(subVec, 1);
+  }
+
   return {
-    vector: mergeVectors(genreVec, subVec),
+    vector,
     subscribedChannelIds: new Set(subscriptions.map((s) => s.channelId)),
   };
 }
@@ -185,7 +248,12 @@ export function rankCandidates({
   const learned = loadLearnedWeights();
   const learnedWeightsArray = learned ? FEATURE_ORDER.map((key) => learned.weights[key]) : null;
 
-  const scored = candidateVideos.map((video) => {
+  // Pass 1: compute each candidate's raw signals. topicMatch has to be
+  // known for the WHOLE pool before pass 2 can gate any single candidate's
+  // discover relative to the pool's own best match — can't do this in one
+  // pass, since a candidate near the end of the list doesn't yet know
+  // whether something earlier in the list out-matched it.
+  const partial = candidateVideos.map((video) => {
     const vDetails = videoDetailsById.get(video.videoId);
     const cDetails = channelDetailsById.get(video.channelId);
 
@@ -203,12 +271,28 @@ export function rankCandidates({
     const topicMatch = cosineSimilarity(profile.vector, combinedVec);
     const engagement = engagementScore(vDetails?.statistics, cDetails?.statistics);
     const freshness = freshnessScore(video.publishedAt);
-    const discover = discoverabilityScore(
+    const rawDiscover = discoverabilityScore(
       cDetails?.statistics?.subscriberCount,
       video.channelId,
       profile.subscribedChannelIds,
       discoverability
     );
+
+    return { video, cDetails, topicMatch, engagement, freshness, rawDiscover };
+  });
+
+  const maxTopicMatch = Math.max(0, ...partial.map((p) => p.topicMatch));
+
+  // Pass 2: gate discover relative to this specific pool's best topicMatch,
+  // not a fixed number — topicMatch's natural scale varies a lot per search,
+  // so "relevant" has to mean "relevant compared to the best this search
+  // itself produced," not some absolute threshold. This is what stops a
+  // small, only-tangentially-relevant channel from one merged-in genre
+  // out-discovering a highly-relevant big channel from another.
+  const scored = partial.map(({ video, cDetails, topicMatch, engagement, freshness, rawDiscover }) => {
+    const relevanceThreshold = maxTopicMatch * RELATIVE_TOPIC_FLOOR_FRACTION;
+    const topicRelevanceGate = relevanceThreshold > 0 ? Math.min(topicMatch / relevanceThreshold, 1) : 1;
+    const discover = rawDiscover * topicRelevanceGate;
 
     const breakdown = { topicMatch, engagement, freshness, discover };
 

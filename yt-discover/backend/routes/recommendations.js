@@ -58,13 +58,17 @@ router.post("/recommendations", async (req, res) => {
 
     const profile = buildTasteProfile({ genres, subscriptions });
 
-    // Pull a candidate pool: one search per typed genre plus a couple of
-    // searches seeded from the user's most recent subscriptions, so results
-    // aren't purely a literal keyword match.
-    const seedQueries = [
-      ...genres,
-      ...subscriptions.slice(0, 3).map((s) => s.title),
-    ];
+    // Pull a candidate pool: one search per typed genre.
+    //
+    // This deliberately does NOT seed searches from subscription titles.
+    // It used to, to make results "less of a literal keyword match" — but
+    // searching a channel's exact name returns that channel and its
+    // lookalikes, not similar-but-new creators, so a search for "minecraft"
+    // would pull in whole batches of unrelated videos from whichever three
+    // channels happened to be first in the user's subscription list.
+    // Subscriptions still shape ranking via the taste profile and the
+    // "already subscribed" penalty — they just don't hijack the pool.
+    const seedQueries = [...genres];
     const videoBatches = await Promise.all(
       seedQueries.map((q) => searchByTopic(q, { maxResults: 15 }))
     );
