@@ -120,12 +120,36 @@ function freshnessScore(publishedAt) {
   return Math.pow(0.5, ageDays / 45);
 }
 
-function engagementScore(stats) {
-  const views = Number(stats?.viewCount || 0);
-  const likes = Number(stats?.likeCount || 0);
+/** @param videoStats   this video's statistics (views, likes)
+ *  @param channelStats the video's channel's own statistics (viewCount,
+ *         videoCount) — used to judge this video against that channel's own
+ *         typical performance, not a fixed global curve. A small channel's
+ *         best video and a mega-channel's best video should both be able to
+ *         score near 1 here; only measuring against a global view count
+ *         would structurally favor the mega-channel every time. */
+function engagementScore(videoStats, channelStats) {
+  const views = Number(videoStats?.viewCount || 0);
+  const likes = Number(videoStats?.likeCount || 0);
   if (views === 0) return 0;
   const likeRatio = Math.min(likes / views, 0.15) / 0.15; // normalize, cap outliers
-  const viewScore = Math.min(Math.log10(views + 1) / 7, 1); // log-scale views, cap ~10M
+
+  const channelTotalViews = Number(channelStats?.viewCount || 0);
+  const channelVideoCount = Number(channelStats?.videoCount || 0);
+  const channelAvgViews = channelVideoCount > 0 ? channelTotalViews / channelVideoCount : 0;
+
+  let viewScore;
+  if (channelAvgViews > 0) {
+    // ratio to the channel's own average video: 0 far below average,
+    // 0.5 exactly at average, approaching 1 well above average. No fixed
+    // cap needed — it saturates smoothly instead of hard-clipping.
+    const ratio = views / channelAvgViews;
+    viewScore = ratio / (ratio + 1);
+  } else {
+    // No channel baseline available (missing/zero videoCount) — fall back
+    // to the old global curve rather than dividing by zero.
+    viewScore = Math.min(Math.log10(views + 1) / 7, 1);
+  }
+
   return 0.6 * viewScore + 0.4 * likeRatio;
 }
 
@@ -177,7 +201,7 @@ export function rankCandidates({
 
     const combinedVec = mergeVectors(videoText, channelText);
     const topicMatch = cosineSimilarity(profile.vector, combinedVec);
-    const engagement = engagementScore(vDetails?.statistics);
+    const engagement = engagementScore(vDetails?.statistics, cDetails?.statistics);
     const freshness = freshnessScore(video.publishedAt);
     const discover = discoverabilityScore(
       cDetails?.statistics?.subscriberCount,
