@@ -49,6 +49,14 @@ const AGE_FILTER_MAX_DAYS = { today: 1, week: 7, month: 31, year: 365 };
 const RESULTS_PER_GENRE = 10;
 const SEARCH_POOL_SIZE = 50;
 
+// How many recently-shown video IDs we remember per browser session to keep
+// "Find creators" from just replaying the same deterministic search+rank
+// output every time it's clicked with the same genres/filters. Stored in the
+// session cookie itself (cookie-session has no server-side store), so this
+// is capped well under the ~4KB cookie limit — 120 eleven-character IDs is
+// roughly 2.2KB before the cookie's own base64/signing overhead.
+const MAX_REMEMBERED_VIDEO_IDS = 120;
+
 function matchesDurationFilter(seconds, filter) {
   if (seconds == null) return true; // unknown duration — don't punish it for missing data
   switch (filter) {
@@ -211,7 +219,15 @@ router.post("/recommendations", async (req, res) => {
       return isShortByDurationFallback(seconds); // probe skipped/failed — conservative guess only
     }
 
+    // Same genres + same filters is a fully deterministic search+rank
+    // pipeline, so without this, clicking "Find creators" again just
+    // replays the identical list. Excluding whatever this browser session
+    // has already been shown — regardless of which search surfaced it —
+    // makes repeat sifting actually turn up something new.
+    const previouslyShown = new Set(req.session.seenVideoIds ?? []);
+
     function passesFilters(video) {
+      if (previouslyShown.has(video.videoId)) return false;
       if (!includeShorts && isShort(video)) return false;
       const seconds = durationSecondsById.get(video.videoId);
       return matchesDurationFilter(seconds, duration) && matchesAgeFilter(video.publishedAt, age);
@@ -267,6 +283,12 @@ router.post("/recommendations", async (req, res) => {
       // matches what the model actually saw — never recomputed after the fact.
       features: entry.breakdown,
     }));
+
+    // Remember what we just showed so the next search (same criteria or
+    // not) doesn't hand back the same videos. FIFO-trimmed to the cap above
+    // rather than left to grow forever.
+    const seenSoFar = [...(req.session.seenVideoIds ?? []), ...results.map((r) => r.video.id)];
+    req.session.seenVideoIds = seenSoFar.slice(-MAX_REMEMBERED_VIDEO_IDS);
 
     res.json({
       results,
