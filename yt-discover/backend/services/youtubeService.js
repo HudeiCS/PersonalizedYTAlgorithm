@@ -44,6 +44,16 @@ export function bestThumbnailUrl(thumbnails) {
   );
 }
 
+/** Parses a YouTube `contentDetails.duration` ISO 8601 string (e.g. "PT4M13S")
+ *  into whole seconds. Returns null for anything that doesn't match, so
+ *  callers can treat "unknown duration" as "don't filter it out". */
+export function parseDurationSeconds(iso) {
+  const match = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(iso ?? "");
+  if (!match) return null;
+  const [, hours, minutes, seconds] = match;
+  return Number(hours || 0) * 3600 + Number(minutes || 0) * 60 + Number(seconds || 0);
+}
+
 /** All channels the user is subscribed to (paginated). Capped at 200 to keep
  *  the algorithm responsive; that's plenty of signal for a taste profile. */
 export async function fetchSubscriptions(user) {

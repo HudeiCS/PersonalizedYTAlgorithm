@@ -7,6 +7,7 @@ import {
   searchByTopic,
   fetchVideoDetails,
   bestThumbnailUrl,
+  parseDurationSeconds,
 } from "../services/youtubeService.js";
 import { buildTasteProfile, rankCandidates, explain, hasLearnedWeights } from "../services/recommendationEngine.js";
 
@@ -36,23 +37,52 @@ router.post("/preferences", requireAuth, (req, res) => {
   res.json({ genres: JSON.parse(updated.genres), discoverability: updated.discoverability });
 });
 
+// Upper bound in days for each "uploaded" filter option; "any" skips the
+// check entirely, so it isn't listed here.
+const AGE_FILTER_MAX_DAYS = { today: 1, week: 7, month: 31, year: 365 };
+
+function matchesDurationFilter(seconds, filter) {
+  if (seconds == null) return true; // unknown duration — don't punish it for missing data
+  switch (filter) {
+    case "under1": return seconds < 60;
+    case "under5": return seconds < 300;
+    case "under10": return seconds < 600;
+    case "over10": return seconds >= 600;
+    default: return true; // "any"
+  }
+}
+
+function matchesAgeFilter(publishedAt, filter) {
+  const maxDays = AGE_FILTER_MAX_DAYS[filter];
+  if (!maxDays) return true; // "any" (or an unrecognized value)
+  const ageDays = (Date.now() - new Date(publishedAt).getTime()) / 86400000;
+  return ageDays <= maxDays;
+}
+
 /**
  * Main discovery endpoint. Body:
- *   { genres: ["minecraft edits", "speedrunning"], discoverability: 0.7 }
+ *   { genres: ["minecraft edits", "speedrunning"], discoverability: 0.7,
+ *     filters: { duration: "any"|"under1"|"under5"|"under10"|"over10",
+ *                age: "any"|"today"|"week"|"month"|"year",
+ *                useSubscriptions: true } }
  * Works two ways:
  *   - signed in: blends genres with the user's real subscriptions
  *   - not signed in: genre-only discovery, no personal data touched
+ * `useSubscriptions: false` opts a signed-in user out of that blend for this
+ * request only, without touching their saved preferences.
  */
 router.post("/recommendations", async (req, res) => {
   const { genres = [], discoverability = 0.6 } = req.body;
+  const { duration = "any", age = "any", useSubscriptions = true } = req.body.filters ?? {};
   if (genres.length === 0) {
     return res.status(400).json({ error: "give at least one genre or creator topic" });
   }
 
   try {
     const signedIn = req.session.userId && getUser(req.session.userId)?.access_token;
+    const usingSubscriptions = Boolean(signedIn && useSubscriptions);
     let subscriptions = [];
-    if (signedIn) {
+    if (usingSubscriptions) {
       const user = getUser(req.session.userId);
       subscriptions = await fetchSubscriptions(user);
     }
@@ -96,9 +126,19 @@ router.post("/recommendations", async (req, res) => {
       if (upgraded) video.thumbnail = upgraded;
     }
 
+    // Duration needs contentDetails (only available now that videoDetails
+    // has come back), so this filter has to happen here rather than
+    // alongside the pool-building above. Age only needs the search snippet's
+    // publishedAt, but it's filtered in the same pass for one clear cutoff
+    // point before ranking sees the pool.
+    const filteredVideos = candidateVideos.filter((video) => {
+      const seconds = parseDurationSeconds(videoDetailsById.get(video.videoId)?.contentDetails?.duration);
+      return matchesDurationFilter(seconds, duration) && matchesAgeFilter(video.publishedAt, age);
+    });
+
     const ranked = rankCandidates({
       profile,
-      candidateVideos,
+      candidateVideos: filteredVideos,
       videoDetailsById,
       channelDetailsById,
       discoverability,
@@ -128,8 +168,8 @@ router.post("/recommendations", async (req, res) => {
 
     res.json({
       results,
-      usedSubscriptions: signedIn,
-      candidatePoolSize: candidateVideos.length,
+      usedSubscriptions: usingSubscriptions,
+      candidatePoolSize: filteredVideos.length,
       usingLearnedWeights: hasLearnedWeights(),
     });
   } catch (err) {

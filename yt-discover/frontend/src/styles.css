@@ -237,6 +237,56 @@ button {
   margin-top: 6px;
 }
 
+/* ---- Filters -------------------------------------------------------- */
+
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 22px;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.filter-field span {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.filter-field select {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+.filter-field select:hover { border-color: var(--gold-dim); }
+
+.filter-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding-bottom: 9px;
+}
+.filter-toggle input[type="checkbox"] {
+  accent-color: var(--gold);
+  width: 15px;
+  height: 15px;
+}
+
 /* ---- Buttons ----------------------------------------------------- */
 
 .btn-primary {
@@ -337,11 +387,14 @@ button {
 
 .grid {
   display: grid;
-  /* Capped upper bound (was 1fr) so cards spawn more columns on wide
-     screens instead of stretching thumbnails past their source resolution
-     and looking blurry. */
-  grid-template-columns: repeat(auto-fill, minmax(260px, 340px));
+  grid-template-columns: 1fr;
   gap: 16px;
+}
+@media (min-width: 640px) {
+  .grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (min-width: 980px) {
+  .grid { grid-template-columns: repeat(3, 1fr); }
 }
 
 .creator-card {

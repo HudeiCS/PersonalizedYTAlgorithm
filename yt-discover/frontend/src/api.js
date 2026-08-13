@@ -24,10 +24,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ genres, discoverability }),
     }),
-  recommendations: (genres, discoverability) =>
+  recommendations: (genres, discoverability, filters) =>
     request("/api/recommendations", {
       method: "POST",
-      body: JSON.stringify({ genres, discoverability }),
+      body: JSON.stringify({ genres, discoverability, filters }),
     }),
   feedback: (videoId, channelId, features, label) =>
     request("/api/feedback", {

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "./api";
 import GenrePicker from "./components/GenrePicker.jsx";
 import DiscoverabilitySlider from "./components/DiscoverabilitySlider.jsx";
+import Filters from "./components/Filters.jsx";
 import AuthPanel from "./components/AuthPanel.jsx";
 import CreatorCard from "./components/CreatorCard.jsx";
 
@@ -10,6 +11,7 @@ export default function App() {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [genres, setGenres] = useState([]);
   const [discoverability, setDiscoverability] = useState(0.6);
+  const [filters, setFilters] = useState({ duration: "any", age: "any", useSubscriptions: true });
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -49,7 +51,7 @@ export default function App() {
     setError(null);
     try {
       if (user) api.savePreferences(genres, discoverability).catch(() => {});
-      const data = await api.recommendations(genres, discoverability);
+      const data = await api.recommendations(genres, discoverability, filters);
       setResults(data.results);
       setPoolMeta({
         usedSubscriptions: data.usedSubscriptions,
@@ -116,6 +118,7 @@ export default function App() {
           <h2>What are you in the mood for?</h2>
           <GenrePicker genres={genres} onChange={setGenres} />
           <DiscoverabilitySlider value={discoverability} onChange={setDiscoverability} />
+          <Filters value={filters} onChange={setFilters} showSubscriptionsToggle={!!user} />
           <div style={{ marginTop: 22, display: "flex", alignItems: "center", gap: 14 }}>
             <button className="btn-primary" onClick={handleFind} disabled={genres.length === 0 || loading}>
               {loading ? "Sifting..." : "Find creators"}
