@@ -41,6 +41,13 @@ router.post("/preferences", requireAuth, (req, res) => {
 // check entirely, so it isn't listed here.
 const AGE_FILTER_MAX_DAYS = { today: 1, week: 7, month: 31, year: 365 };
 
+// How many results we try to surface per typed genre/topic, and how big a
+// raw pool we pull per genre to make that achievable. 50 is YouTube's own
+// per-call cap on search.list — asking for it costs the same 100 quota
+// units as asking for 15 did, so there's no reason to sample a smaller pool.
+const RESULTS_PER_GENRE = 10;
+const SEARCH_POOL_SIZE = 50;
+
 function matchesDurationFilter(seconds, filter) {
   if (seconds == null) return true; // unknown duration — don't punish it for missing data
   switch (filter) {
@@ -59,21 +66,47 @@ function matchesAgeFilter(publishedAt, filter) {
   return ageDays <= maxDays;
 }
 
+// YouTube Shorts don't have a dedicated API flag on search results; <=60s is
+// the same cutoff YouTube itself used to define Shorts eligibility, and it's
+// already how our own "under1" duration bucket is defined.
+function isShort(seconds) {
+  return seconds != null && seconds <= 60;
+}
+
+// Turns an age filter into search.list's `publishedAfter` param so the
+// filter narrows what YouTube searches, not just what we keep afterward.
+function publishedAfterFor(ageFilter) {
+  const maxDays = AGE_FILTER_MAX_DAYS[ageFilter];
+  return maxDays ? new Date(Date.now() - maxDays * 86400000).toISOString() : undefined;
+}
+
 /**
  * Main discovery endpoint. Body:
  *   { genres: ["minecraft edits", "speedrunning"], discoverability: 0.7,
  *     filters: { duration: "any"|"under1"|"under5"|"under10"|"over10",
  *                age: "any"|"today"|"week"|"month"|"year",
- *                useSubscriptions: true } }
+ *                useSubscriptions: true,
+ *                includeShorts: true } }
  * Works two ways:
  *   - signed in: blends genres with the user's real subscriptions
  *   - not signed in: genre-only discovery, no personal data touched
  * `useSubscriptions: false` opts a signed-in user out of that blend for this
  * request only, without touching their saved preferences.
+ *
+ * Each typed genre is searched, filtered, and ranked as its own pool, and
+ * contributes up to RESULTS_PER_GENRE results of its own (see genreCoverage
+ * in the response) — a single blended pool sorted once and sliced to a flat
+ * top-N let one strongly-matching genre crowd out a second, less
+ * "search-friendly" one entirely.
  */
 router.post("/recommendations", async (req, res) => {
   const { genres = [], discoverability = 0.6 } = req.body;
-  const { duration = "any", age = "any", useSubscriptions = true } = req.body.filters ?? {};
+  const {
+    duration = "any",
+    age = "any",
+    useSubscriptions = true,
+    includeShorts = true,
+  } = req.body.filters ?? {};
   if (genres.length === 0) {
     return res.status(400).json({ error: "give at least one genre or creator topic" });
   }
@@ -100,13 +133,22 @@ router.post("/recommendations", async (req, res) => {
     // Subscriptions still shape ranking via the taste profile and the
     // "already subscribed" penalty — they just don't hijack the pool.
     const seedQueries = [...genres];
+    const searchOptions = {
+      maxResults: SEARCH_POOL_SIZE,
+      publishedAfter: publishedAfterFor(age),
+      // "short" (<4min) is the only YouTube-native duration bucket that lines
+      // up cleanly with one of ours (under1 ⊂ short); the others are left
+      // unrestricted here and filtered exactly below instead, so a request
+      // for "under5" doesn't silently lose a real 4m30s match.
+      videoDuration: duration === "under1" ? "short" : undefined,
+    };
     const videoBatches = await Promise.all(
-      seedQueries.map((q) => searchByTopic(q, { maxResults: 15 }))
+      seedQueries.map((q) => searchByTopic(q, searchOptions))
     );
-    const candidateVideos = dedupeBy(videoBatches.flat(), (v) => v.videoId);
 
-    const videoIds = candidateVideos.map((v) => v.videoId);
-    const channelIds = [...new Set(candidateVideos.map((v) => v.channelId))];
+    const allCandidateVideos = dedupeBy(videoBatches.flat(), (v) => v.videoId);
+    const videoIds = allCandidateVideos.map((v) => v.videoId);
+    const channelIds = [...new Set(allCandidateVideos.map((v) => v.channelId))];
 
     const [videoDetails, channelDetails] = await Promise.all([
       fetchVideoDetails(videoIds),
@@ -121,34 +163,58 @@ router.post("/recommendations", async (req, res) => {
     // frequently has `standard`/`maxres` for the same video, so prefer that
     // higher-res source now that we have it, rather than showing the
     // low-res one stretched to fill a card.
-    for (const video of candidateVideos) {
+    for (const video of allCandidateVideos) {
       const upgraded = bestThumbnailUrl(videoDetailsById.get(video.videoId)?.snippet?.thumbnails);
       if (upgraded) video.thumbnail = upgraded;
     }
 
-    // Duration needs contentDetails (only available now that videoDetails
-    // has come back), so this filter has to happen here rather than
-    // alongside the pool-building above. Age only needs the search snippet's
-    // publishedAt, but it's filtered in the same pass for one clear cutoff
-    // point before ranking sees the pool.
-    const filteredVideos = candidateVideos.filter((video) => {
-      const seconds = parseDurationSeconds(videoDetailsById.get(video.videoId)?.contentDetails?.duration);
+    const durationSecondsById = new Map(
+      allCandidateVideos.map((v) => [
+        v.videoId,
+        parseDurationSeconds(videoDetailsById.get(v.videoId)?.contentDetails?.duration),
+      ])
+    );
+
+    function passesFilters(video) {
+      const seconds = durationSecondsById.get(video.videoId);
+      if (!includeShorts && isShort(seconds)) return false;
       return matchesDurationFilter(seconds, duration) && matchesAgeFilter(video.publishedAt, age);
+    }
+
+    // Rank each genre's own search results independently so every typed
+    // topic gets its own shot at RESULTS_PER_GENRE, rather than being sorted
+    // into one shared pool. A video already claimed by an earlier genre is
+    // skipped for a later one even if it would also rank highly there, so
+    // overlapping topics don't just show the same videos twice.
+    const claimedVideoIds = new Set();
+    const genreCoverage = [];
+    const scoredEntries = [];
+
+    seedQueries.forEach((genre, i) => {
+      const pool = dedupeBy(videoBatches[i], (v) => v.videoId).filter(
+        (v) => passesFilters(v) && !claimedVideoIds.has(v.videoId)
+      );
+
+      const ranked = rankCandidates({
+        profile,
+        candidateVideos: pool,
+        videoDetailsById,
+        channelDetailsById,
+        discoverability,
+      });
+
+      const top = ranked.slice(0, RESULTS_PER_GENRE);
+      top.forEach((entry) => claimedVideoIds.add(entry.video.videoId));
+      scoredEntries.push(...top.map((entry) => ({ ...entry, matchedGenre: genre })));
+      genreCoverage.push({ genre, found: top.length, requested: RESULTS_PER_GENRE });
     });
 
-    const ranked = rankCandidates({
-      profile,
-      candidateVideos: filteredVideos,
-      videoDetailsById,
-      channelDetailsById,
-      discoverability,
-    });
-
-    const results = ranked.slice(0, 24).map((entry) => ({
+    const results = scoredEntries.map((entry) => ({
       channelId: entry.video.channelId,
       channelTitle: entry.channel?.snippet?.title ?? entry.video.channelTitle,
       channelThumbnail: bestThumbnailUrl(entry.channel?.snippet?.thumbnails),
       subscriberCount: entry.channel?.statistics?.subscriberCount ?? null,
+      matchedGenre: entry.matchedGenre,
       video: {
         id: entry.video.videoId,
         title: entry.video.title,
@@ -168,8 +234,9 @@ router.post("/recommendations", async (req, res) => {
 
     res.json({
       results,
+      genreCoverage,
       usedSubscriptions: usingSubscriptions,
-      candidatePoolSize: filteredVideos.length,
+      candidatePoolSize: allCandidateVideos.filter(passesFilters).length,
       usingLearnedWeights: hasLearnedWeights(),
     });
   } catch (err) {

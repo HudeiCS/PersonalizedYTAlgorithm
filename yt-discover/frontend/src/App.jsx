@@ -11,7 +11,12 @@ export default function App() {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [genres, setGenres] = useState([]);
   const [discoverability, setDiscoverability] = useState(0.6);
-  const [filters, setFilters] = useState({ duration: "any", age: "any", useSubscriptions: true });
+  const [filters, setFilters] = useState({
+    duration: "any",
+    age: "any",
+    useSubscriptions: true,
+    includeShorts: true,
+  });
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -57,6 +62,7 @@ export default function App() {
         usedSubscriptions: data.usedSubscriptions,
         size: data.candidatePoolSize,
         usingLearnedWeights: data.usingLearnedWeights,
+        genreCoverage: data.genreCoverage ?? [],
       });
     } catch (err) {
       setError(err.message);
@@ -145,18 +151,36 @@ export default function App() {
               )}
             </div>
             {results.length === 0 ? (
-              <div className="status-text">No strong matches — try a broader or different genre.</div>
+              <div className="status-text">No strong matches — try a broader or different genre, or loosen your filters.</div>
             ) : (
-              <div className="grid">
-                {results.map((r) => (
-                  <CreatorCard
-                    key={r.video.id}
-                    result={r}
-                    feedbackState={feedbackGiven[r.video.id]}
-                    onFeedback={handleFeedback}
-                  />
-                ))}
-              </div>
+              (poolMeta?.genreCoverage ?? []).map(({ genre, found, requested }) => {
+                const items = results.filter((r) => r.matchedGenre === genre);
+                return (
+                  <div className="genre-section" key={genre}>
+                    <div className="genre-section-header">
+                      <h3>{genre}</h3>
+                      <span className="genre-count">
+                        {found} of {requested} matches
+                        {found < requested && " · try loosening your filters"}
+                      </span>
+                    </div>
+                    {items.length === 0 ? (
+                      <div className="genre-empty">No matches for this topic with the current filters.</div>
+                    ) : (
+                      <div className="grid">
+                        {items.map((r) => (
+                          <CreatorCard
+                            key={r.video.id}
+                            result={r}
+                            feedbackState={feedbackGiven[r.video.id]}
+                            onFeedback={handleFeedback}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
             )}
           </>
         )}

@@ -39,6 +39,15 @@ export default function Filters({ value, onChange, showSubscriptionsToggle }) {
         </select>
       </label>
 
+      <label className="filter-toggle">
+        <input
+          type="checkbox"
+          checked={value.includeShorts}
+          onChange={(e) => set("includeShorts", e.target.checked)}
+        />
+        <span>Include Shorts</span>
+      </label>
+
       {showSubscriptionsToggle && (
         <label className="filter-toggle">
           <input

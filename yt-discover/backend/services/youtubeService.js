@@ -104,8 +104,18 @@ export async function enrichChannels(channelIds, useAuthedClient = null) {
 
 /** Genre/topic-driven channel discovery. Searches videos matching the
  *  query, then rolls the results up to their parent channels — this is how
- *  we go from "Minecraft edit videos" to a list of candidate creators. */
-export async function searchByTopic(query, { order = "relevance", maxResults = 25 } = {}) {
+ *  we go from "Minecraft edit videos" to a list of candidate creators.
+ *
+ *  `publishedAfter`/`videoDuration` push the user's age/duration filters
+ *  into the search itself rather than sampling `maxResults` videos and
+ *  discarding most of them locally afterward — with `order: "relevance"`,
+ *  the top of an unfiltered pool skews toward old evergreen uploads, so a
+ *  local-only "past year" filter on a small sample routinely left almost
+ *  nothing standing. */
+export async function searchByTopic(
+  query,
+  { order = "relevance", maxResults = 25, publishedAfter, videoDuration } = {}
+) {
   const yt = publicClient();
   const { data } = await yt.search.list({
     part: ["snippet"],
@@ -115,6 +125,8 @@ export async function searchByTopic(query, { order = "relevance", maxResults = 2
     maxResults,
     relevanceLanguage: "en",
     safeSearch: "none",
+    ...(publishedAfter ? { publishedAfter } : {}),
+    ...(videoDuration ? { videoDuration } : {}),
   });
 
   const videos = (data.items ?? []).map((item) => ({
