@@ -6,6 +6,7 @@ import {
   enrichChannels,
   searchByTopic,
   fetchVideoDetails,
+  bestThumbnailUrl,
 } from "../services/youtubeService.js";
 import { buildTasteProfile, rankCandidates, explain, hasLearnedWeights } from "../services/recommendationEngine.js";
 
@@ -85,6 +86,16 @@ router.post("/recommendations", async (req, res) => {
     const videoDetailsById = new Map(videoDetails.map((v) => [v.id, v]));
     const channelDetailsById = new Map(channelDetails.map((c) => [c.id, c]));
 
+    // search.list (where candidateVideos came from) only ever returns up to
+    // a 480x360 thumbnail. videos.list — already fetched above for stats —
+    // frequently has `standard`/`maxres` for the same video, so prefer that
+    // higher-res source now that we have it, rather than showing the
+    // low-res one stretched to fill a card.
+    for (const video of candidateVideos) {
+      const upgraded = bestThumbnailUrl(videoDetailsById.get(video.videoId)?.snippet?.thumbnails);
+      if (upgraded) video.thumbnail = upgraded;
+    }
+
     const ranked = rankCandidates({
       profile,
       candidateVideos,
@@ -96,7 +107,7 @@ router.post("/recommendations", async (req, res) => {
     const results = ranked.slice(0, 24).map((entry) => ({
       channelId: entry.video.channelId,
       channelTitle: entry.channel?.snippet?.title ?? entry.video.channelTitle,
-      channelThumbnail: entry.channel?.snippet?.thumbnails?.default?.url,
+      channelThumbnail: bestThumbnailUrl(entry.channel?.snippet?.thumbnails),
       subscriberCount: entry.channel?.statistics?.subscriberCount ?? null,
       video: {
         id: entry.video.videoId,

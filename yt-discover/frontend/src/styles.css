@@ -337,7 +337,10 @@ button {
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  /* Capped upper bound (was 1fr) so cards spawn more columns on wide
+     screens instead of stretching thumbnails past their source resolution
+     and looking blurry. */
+  grid-template-columns: repeat(auto-fill, minmax(260px, 340px));
   gap: 16px;
 }
 

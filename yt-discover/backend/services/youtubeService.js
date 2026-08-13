@@ -29,6 +29,21 @@ function publicClient() {
   return google.youtube({ version: "v3", auth: process.env.GOOGLE_API_KEY });
 }
 
+/** Picks the highest-resolution thumbnail YouTube gave us for a given
+ *  snippet.thumbnails object. `search.list` only ever returns up to `high`
+ *  (~480x360); `videos.list` and `channels.list` often go up to `standard`
+ *  or `maxres`. Falling back down the chain keeps this safe to call on
+ *  either shape without ever ending up with no thumbnail at all. */
+export function bestThumbnailUrl(thumbnails) {
+  return (
+    thumbnails?.maxres?.url ??
+    thumbnails?.standard?.url ??
+    thumbnails?.high?.url ??
+    thumbnails?.medium?.url ??
+    thumbnails?.default?.url
+  );
+}
+
 /** All channels the user is subscribed to (paginated). Capped at 200 to keep
  *  the algorithm responsive; that's plenty of signal for a taste profile. */
 export async function fetchSubscriptions(user) {
@@ -99,7 +114,7 @@ export async function searchByTopic(query, { order = "relevance", maxResults = 2
     title: item.snippet.title,
     description: item.snippet.description,
     publishedAt: item.snippet.publishedAt,
-    thumbnail: item.snippet.thumbnails?.medium?.url,
+    thumbnail: bestThumbnailUrl(item.snippet.thumbnails),
   }));
 
   return videos;
