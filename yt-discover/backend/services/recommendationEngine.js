@@ -303,9 +303,27 @@ export function rankCandidates({
     // order as ranking by the raw weighted sum would; the fallback blend
     // below is that same shape without the sigmoid, weights chosen by
     // hand instead of trained on real feedback.
+    //
+    // topicMatch and discover trade weight against each other as the
+    // slider moves; engagement (0.15) and freshness (0.10) stay fixed since
+    // they're judgments about the video itself, not about creator size.
+    // Anchored so the default slider (0.6) reproduces the original
+    // hand-picked 0.45/0.30 split exactly — below that, discoverWeight
+    // ramps down toward 0 at slider 0 ("popular creators are fine"); above
+    // it, discoverWeight ramps up to 0.70 at slider 1. Previously this was
+    // a flat 0.30 no matter the slider, so even a perfect discover score
+    // (1.0 × 0.30 = 0.30) could never outweigh a big, highly relevant
+    // channel's topicMatch + engagement + freshness (up to 0.70 combined) —
+    // "surface small/new creators only" could never actually win.
+    const discoverWeight =
+      discoverability <= 0.6
+        ? 0.3 * (discoverability / 0.6)
+        : 0.3 + ((discoverability - 0.6) / 0.4) * 0.4;
+    const topicWeight = 0.75 - discoverWeight;
+
     const score = learned
       ? predict(learnedWeightsArray, learned.bias, FEATURE_ORDER.map((key) => breakdown[key]))
-      : 0.45 * topicMatch + 0.15 * engagement + 0.1 * freshness + 0.3 * discover;
+      : topicWeight * topicMatch + 0.15 * engagement + 0.1 * freshness + discoverWeight * discover;
 
     return {
       video,

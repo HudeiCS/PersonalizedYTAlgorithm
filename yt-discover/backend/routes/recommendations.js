@@ -8,6 +8,7 @@ import {
   fetchVideoDetails,
   bestThumbnailUrl,
   parseDurationSeconds,
+  isYouTubeShort,
 } from "../services/youtubeService.js";
 import { buildTasteProfile, rankCandidates, explain, hasLearnedWeights } from "../services/recommendationEngine.js";
 
@@ -66,10 +67,15 @@ function matchesAgeFilter(publishedAt, filter) {
   return ageDays <= maxDays;
 }
 
-// YouTube Shorts don't have a dedicated API flag on search results; <=60s is
-// the same cutoff YouTube itself used to define Shorts eligibility, and it's
-// already how our own "under1" duration bucket is defined.
-function isShort(seconds) {
+// Anything longer than this definitely isn't a Short (YouTube's own cap is
+// 180s), so there's no reason to spend a network probe on it. A little
+// slack above 180 costs nothing and protects against that cap moving again.
+const SHORT_PROBE_CEILING_SECONDS = 200;
+
+// Fallback used only when the /shorts/<id> probe is skipped or inconclusive.
+// Deliberately conservative (well under the real 180s cap) since guessing
+// wrong here means silently hiding a video the user never asked to exclude.
+function isShortByDurationFallback(seconds) {
   return seconds != null && seconds <= 60;
 }
 
@@ -175,9 +181,39 @@ router.post("/recommendations", async (req, res) => {
       ])
     );
 
-    function passesFilters(video) {
+    // Only worth asking YouTube's /shorts/ routing when the user actually
+    // wants Shorts excluded, and only for videos short enough to plausibly
+    // be one — anything already confirmed longer than the probe ceiling is
+    // definitely not a Short, so skipping it there saves a network round
+    // trip without any accuracy cost.
+    const shortStatusById = new Map();
+    if (!includeShorts) {
+      const ambiguousVideoIds = allCandidateVideos
+        .filter((v) => {
+          const seconds = durationSecondsById.get(v.videoId);
+          return seconds == null || seconds <= SHORT_PROBE_CEILING_SECONDS;
+        })
+        .map((v) => v.videoId);
+
+      const PROBE_CONCURRENCY = 8;
+      for (let i = 0; i < ambiguousVideoIds.length; i += PROBE_CONCURRENCY) {
+        const batch = ambiguousVideoIds.slice(i, i + PROBE_CONCURRENCY);
+        const statuses = await Promise.all(batch.map((id) => isYouTubeShort(id)));
+        batch.forEach((id, idx) => shortStatusById.set(id, statuses[idx]));
+      }
+    }
+
+    function isShort(video) {
       const seconds = durationSecondsById.get(video.videoId);
-      if (!includeShorts && isShort(seconds)) return false;
+      if (seconds != null && seconds > SHORT_PROBE_CEILING_SECONDS) return false;
+      const probed = shortStatusById.get(video.videoId);
+      if (probed != null) return probed; // authoritative — straight from YouTube's own routing
+      return isShortByDurationFallback(seconds); // probe skipped/failed — conservative guess only
+    }
+
+    function passesFilters(video) {
+      if (!includeShorts && isShort(video)) return false;
+      const seconds = durationSecondsById.get(video.videoId);
       return matchesDurationFilter(seconds, duration) && matchesAgeFilter(video.publishedAt, age);
     }
 

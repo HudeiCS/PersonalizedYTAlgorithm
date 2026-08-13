@@ -54,6 +54,33 @@ export function parseDurationSeconds(iso) {
   return Number(hours || 0) * 3600 + Number(minutes || 0) * 60 + Number(seconds || 0);
 }
 
+/** Whether a video is an actual YouTube Short — determined by asking
+ *  YouTube itself rather than guessing from duration. The Data API has no
+ *  "isShort" field at all, and duration alone is an unreliable proxy: most
+ *  Shorts are under 60s, but YouTube raised the Shorts length cap to 180s,
+ *  so plenty of real Shorts run 60-180s — while plenty of ordinary,
+ *  intentionally short videos are also under 60s without being Shorts.
+ *
+ *  This instead relies on the same routing YouTube's own clients use:
+ *  visiting /shorts/<id> serves the Short directly (200) for a real Short,
+ *  but 30x-redirects to /watch?v=<id> for anything else. Returns null
+ *  (unknown) on any network hiccup so callers can fall back gracefully
+ *  instead of wrongly excluding a legitimate video. */
+export async function isYouTubeShort(videoId) {
+  try {
+    const res = await fetch(`https://www.youtube.com/shorts/${videoId}`, {
+      method: "HEAD",
+      redirect: "manual",
+      signal: AbortSignal.timeout(3000),
+    });
+    if (res.status >= 300 && res.status < 400) return false;
+    if (res.status === 200) return true;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /** All channels the user is subscribed to (paginated). Capped at 200 to keep
  *  the algorithm responsive; that's plenty of signal for a taste profile. */
 export async function fetchSubscriptions(user) {
