@@ -13,16 +13,25 @@ const SUGGESTIONS = [
 
 export default function GenrePicker({ genres, onChange }) {
   const [draft, setDraft] = useState("");
+  // Chips appearing and disappearing is a purely visual event otherwise —
+  // this is what makes add/remove perceivable without sight.
+  const [announcement, setAnnouncement] = useState("");
 
   function addGenre(value) {
     const clean = value.trim().toLowerCase();
-    if (!clean || genres.includes(clean)) return;
+    if (!clean) return;
+    if (genres.includes(clean)) {
+      setAnnouncement(`${clean} is already added.`);
+      return;
+    }
     onChange([...genres, clean]);
     setDraft("");
+    setAnnouncement(`Added topic ${clean}. ${genres.length + 1} total.`);
   }
 
   function removeGenre(value) {
     onChange(genres.filter((g) => g !== value));
+    setAnnouncement(`Removed topic ${value}. ${genres.length - 1} remaining.`);
   }
 
   function handleKeyDown(e) {
@@ -36,27 +45,57 @@ export default function GenrePicker({ genres, onChange }) {
 
   return (
     <div>
+      {/* The field had no label at all before — only a placeholder, which
+          disappears on typing and is not a substitute for a label
+          (WCAG 3.3.2). */}
+      <label className="field-label" htmlFor="genre-input">
+        Topics, genres or creators to search for
+      </label>
+
       <div className="chip-input">
-        {genres.map((g) => (
-          <span className="chip" key={g}>
-            {g}
-            <button aria-label={`remove ${g}`} onClick={() => removeGenre(g)}>×</button>
-          </span>
-        ))}
+        {genres.length > 0 && (
+          <ul className="chip-list" aria-label="Selected topics">
+            {genres.map((g) => (
+              <li className="chip" key={g}>
+                <span>{g}</span>
+                <button type="button" aria-label={`Remove topic ${g}`} onClick={() => removeGenre(g)}>
+                  <span aria-hidden="true">×</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
         <input
+          id="genre-input"
+          type="text"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={handleKeyDown}
+          aria-describedby="genre-input-hint"
           placeholder={genres.length ? "add another..." : "e.g. minecraft edits, cozy cooking..."}
         />
       </div>
-      <div className="suggestions">
+
+      <p id="genre-input-hint" className="field-hint">
+        Type a topic and press Enter to add it. Press Backspace in an empty
+        field to remove the last one.
+      </p>
+
+      <div className="suggestions" role="group" aria-label="Suggested topics">
         {SUGGESTIONS.filter((s) => !genres.includes(s)).map((s) => (
-          <button key={s} className="suggestion-btn" onClick={() => addGenre(s)}>
-            + {s}
+          <button
+            key={s}
+            type="button"
+            className="suggestion-btn"
+            aria-label={`Add suggested topic ${s}`}
+            onClick={() => addGenre(s)}
+          >
+            <span aria-hidden="true">+ </span>{s}
           </button>
         ))}
       </div>
+
+      <div className="sr-only" role="status" aria-live="polite">{announcement}</div>
     </div>
   );
 }

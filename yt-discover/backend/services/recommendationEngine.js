@@ -216,13 +216,30 @@ function engagementScore(videoStats, channelStats) {
   return 0.6 * viewScore + 0.4 * likeRatio;
 }
 
+// What to assume when a channel's subscriber count is unavailable — either
+// because the channel hides it or the API omitted it. Roughly a mid-size
+// channel: deliberately unremarkable, so an unknown neither earns nor loses
+// the small-creator boost.
+const UNKNOWN_SUBSCRIBER_ASSUMPTION = 100_000;
+
 /** Core discoverability signal: an inverse-log curve on subscriber count so
  *  a 5k-subscriber creator scores much higher than a 5M one, plus a flat
  *  bonus for channels the user isn't already subscribed to. The slider
  *  (0 = "don't care about size", 1 = "small creators only") controls how
  *  hard this pulls against raw popularity. */
-function discoverabilityScore(subscriberCount, channelId, subscribedIds, slider) {
-  const subs = Number(subscriberCount || 0);
+function discoverabilityScore(statistics, channelId, subscribedIds, slider) {
+  // A channel that hides its subscriber count reports no number at all, and
+  // `Number(undefined || 0)` reads that as zero — i.e. as the smallest
+  // creator on YouTube, handing it the maximum small-creator boost. That's
+  // the exact opposite of what "unknown" should mean, and it let channels
+  // of any size ride the discoverability slider to the top by hiding a
+  // single setting.
+  const reported = statistics?.subscriberCount == null ? NaN : Number(statistics.subscriberCount);
+  const subs =
+    statistics?.hiddenSubscriberCount === true || !Number.isFinite(reported)
+      ? UNKNOWN_SUBSCRIBER_ASSUMPTION
+      : reported;
+
   const sizePenaltyFree = 1 - Math.min(Math.log10(subs + 10) / 8, 1); // ~0 at 100M, ~1 at <100 subs
   const newToUserBonus = subscribedIds.has(channelId) ? 0 : 0.25;
   return Math.min(sizePenaltyFree + newToUserBonus, 1) * slider + (1 - slider) * newToUserBonus;
@@ -234,6 +251,11 @@ function discoverabilityScore(subscriberCount, channelId, subscribedIds, slider)
  * @param videoDetails   videos.list results keyed by videoId (stats)
  * @param channelDetails channels.list results keyed by channelId (stats/topics)
  * @param discoverability 0..1 slider from the user
+ * @param maxPerChannel  how many videos a single channel may contribute at
+ *        most. See the ordering note on the rollup below — results always
+ *        lead with one-per-channel regardless of this value, so raising it
+ *        only ever appends extra videos after the distinct channels run
+ *        out; it never lets a prolific channel take the top slots.
  */
 export function rankCandidates({
   profile,
@@ -241,6 +263,7 @@ export function rankCandidates({
   videoDetailsById,
   channelDetailsById,
   discoverability = 0.6,
+  maxPerChannel = 1,
 }) {
   // Loaded once per call, not once per candidate — this file only changes
   // when trainWeights.js reruns, so re-reading it 20+ times per request
@@ -272,7 +295,7 @@ export function rankCandidates({
     const engagement = engagementScore(vDetails?.statistics, cDetails?.statistics);
     const freshness = freshnessScore(video.publishedAt);
     const rawDiscover = discoverabilityScore(
-      cDetails?.statistics?.subscriberCount,
+      cDetails?.statistics,
       video.channelId,
       profile.subscribedChannelIds,
       discoverability
@@ -309,16 +332,24 @@ export function rankCandidates({
     // they're judgments about the video itself, not about creator size.
     // Anchored so the default slider (0.6) reproduces the original
     // hand-picked 0.45/0.30 split exactly — below that, discoverWeight
-    // ramps down toward 0 at slider 0 ("popular creators are fine"); above
-    // it, discoverWeight ramps up to 0.70 at slider 1. Previously this was
-    // a flat 0.30 no matter the slider, so even a perfect discover score
-    // (1.0 × 0.30 = 0.30) could never outweigh a big, highly relevant
-    // channel's topicMatch + engagement + freshness (up to 0.70 combined) —
-    // "surface small/new creators only" could never actually win.
+    // ramps down toward 0 at slider 0 ("popular creators are fine").
+    //
+    // Above 0.6 it ramps to 0.50, NOT the 0.70 it used to. 0.70 left
+    // topicWeight at 0.05, meaning that at "small creators only" the app
+    // had almost stopped caring what the video was about — a tiny channel
+    // on any subject outranked a well-matched one. That was a workaround
+    // for the real problem, which was never the weights: an
+    // order:"relevance" search for "hiking" returns a pool that is ~62%
+    // channels over 100k subs, so no weighting could surface small
+    // creators that simply weren't in the candidate set. That's fixed at
+    // the source now (routes/recommendations.js blends in an order:"date"
+    // search as the slider rises, which runs ~96% under 100k), so
+    // discoverability no longer has to fight the pool it was handed and
+    // topic relevance can keep a meaningful 0.25 floor.
     const discoverWeight =
       discoverability <= 0.6
         ? 0.3 * (discoverability / 0.6)
-        : 0.3 + ((discoverability - 0.6) / 0.4) * 0.4;
+        : 0.3 + ((discoverability - 0.6) / 0.4) * 0.2;
     const topicWeight = 0.75 - discoverWeight;
 
     const score = learned
@@ -333,17 +364,33 @@ export function rankCandidates({
     };
   });
 
-  // Roll up to one best-scoring entry per channel so a single prolific
-  // channel doesn't flood the results.
-  const byChannel = new Map();
-  for (const entry of scored) {
+  // Roll up per channel so a single prolific channel doesn't flood the
+  // results — but *rank-limited* rather than hard-capped at one.
+  //
+  // Every entry gets a `channelRank`: 0 for its channel's best-scoring
+  // video, 1 for its second best, and so on. Sorting by channelRank first
+  // and score second means the returned list is laid out in bands — every
+  // channel's best video, then every channel's second-best, etc. So a
+  // caller taking the top N gets as many distinct channels as exist before
+  // it ever sees a repeat, no matter what maxPerChannel is set to.
+  //
+  // That ordering is what makes maxPerChannel safe to raise. A broad genre
+  // search has 35+ distinct channels and never reaches band 1, so it behaves
+  // exactly as it did when this was hard-capped at one per channel. A
+  // creator-name search ("caseoh") has only two or three channels in the
+  // whole pool, and the extra bands are the only way it can return a full
+  // page at all.
+  const rankWithinChannel = new Map();
+  const ranked = [];
+  for (const entry of [...scored].sort((a, b) => b.score - a.score)) {
     const key = entry.video.channelId;
-    if (!byChannel.has(key) || byChannel.get(key).score < entry.score) {
-      byChannel.set(key, entry);
-    }
+    const channelRank = rankWithinChannel.get(key) ?? 0;
+    if (channelRank >= maxPerChannel) continue;
+    rankWithinChannel.set(key, channelRank + 1);
+    ranked.push({ ...entry, channelRank });
   }
 
-  return [...byChannel.values()].sort((a, b) => b.score - a.score);
+  return ranked.sort((a, b) => a.channelRank - b.channelRank || b.score - a.score);
 }
 
 /** Turns the score breakdown into a plain-English "why this" line. */

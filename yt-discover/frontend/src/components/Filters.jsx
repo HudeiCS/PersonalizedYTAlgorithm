@@ -20,44 +20,59 @@ export default function Filters({ value, onChange, showSubscriptionsToggle }) {
   }
 
   return (
-    <div className="filter-row">
-      <label className="filter-field">
-        <span>Duration</span>
-        <select value={value.duration} onChange={(e) => set("duration", e.target.value)}>
+    // fieldset/legend groups these four unrelated-looking controls into one
+    // named set, so a screen reader announces "Filters" as context when
+    // landing on any of them rather than four loose inputs.
+    <fieldset className="filter-row">
+      <legend className="sr-only">Filters</legend>
+
+      <div className="filter-field">
+        <label htmlFor="filter-duration">Duration</label>
+        <select
+          id="filter-duration"
+          value={value.duration}
+          onChange={(e) => set("duration", e.target.value)}
+        >
           {DURATION_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>{opt.label}</option>
           ))}
         </select>
-      </label>
+      </div>
 
-      <label className="filter-field">
-        <span>Uploaded</span>
-        <select value={value.age} onChange={(e) => set("age", e.target.value)}>
+      <div className="filter-field">
+        <label htmlFor="filter-age">Uploaded</label>
+        <select
+          id="filter-age"
+          value={value.age}
+          onChange={(e) => set("age", e.target.value)}
+        >
           {AGE_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>{opt.label}</option>
           ))}
         </select>
-      </label>
+      </div>
 
-      <label className="filter-toggle">
+      <div className="filter-toggle">
         <input
+          id="filter-shorts"
           type="checkbox"
           checked={value.includeShorts}
           onChange={(e) => set("includeShorts", e.target.checked)}
         />
-        <span>Include Shorts</span>
-      </label>
+        <label htmlFor="filter-shorts">Include Shorts</label>
+      </div>
 
       {showSubscriptionsToggle && (
-        <label className="filter-toggle">
+        <div className="filter-toggle">
           <input
+            id="filter-subscriptions"
             type="checkbox"
             checked={value.useSubscriptions}
             onChange={(e) => set("useSubscriptions", e.target.checked)}
           />
-          <span>Factor in my subscriptions</span>
-        </label>
+          <label htmlFor="filter-subscriptions">Factor in my subscriptions</label>
+        </div>
       )}
-    </div>
+    </fieldset>
   );
 }
