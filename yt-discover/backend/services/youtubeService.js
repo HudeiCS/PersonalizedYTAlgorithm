@@ -138,10 +138,22 @@ export async function enrichChannels(channelIds, useAuthedClient = null) {
  *  discarding most of them locally afterward — with `order: "relevance"`,
  *  the top of an unfiltered pool skews toward old evergreen uploads, so a
  *  local-only "past year" filter on a small sample routinely left almost
- *  nothing standing. */
+ *  nothing standing.
+ *
+ *  Returns `{ videos, nextPageToken }` rather than a bare array so callers
+ *  can page for more when one page doesn't yield enough distinct channels.
+ *  Paging is the caller's decision because it's the main quota cost — see
+ *  the search loop in routes/recommendations.js. */
 export async function searchByTopic(
   query,
-  { order = "relevance", maxResults = 25, publishedAfter, videoDuration } = {}
+  {
+    order = "relevance",
+    maxResults = 25,
+    publishedAfter,
+    publishedBefore,
+    videoDuration,
+    pageToken,
+  } = {}
 ) {
   const yt = publicClient();
   const { data } = await yt.search.list({
@@ -153,7 +165,12 @@ export async function searchByTopic(
     relevanceLanguage: "en",
     safeSearch: "none",
     ...(publishedAfter ? { publishedAfter } : {}),
+    // Pairs with publishedAfter to bound a search to a specific window,
+    // which is how repeat searches of the same topic draw from different
+    // candidates instead of re-ranking the same page.
+    ...(publishedBefore ? { publishedBefore } : {}),
     ...(videoDuration ? { videoDuration } : {}),
+    ...(pageToken ? { pageToken } : {}),
   });
 
   const videos = (data.items ?? []).map((item) => ({
@@ -166,7 +183,7 @@ export async function searchByTopic(
     thumbnail: bestThumbnailUrl(item.snippet.thumbnails),
   }));
 
-  return videos;
+  return { videos, nextPageToken: data.nextPageToken ?? null };
 }
 
 /** Video-level stats (views, likes, tags) for scoring engagement + recency.
