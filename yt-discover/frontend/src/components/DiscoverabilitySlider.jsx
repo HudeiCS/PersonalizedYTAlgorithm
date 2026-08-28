@@ -16,27 +16,31 @@ export default function DiscoverabilitySlider({ value, onChange }) {
       <div className="slider-row">
         {/* Was an unlabelled <span>, so the control had no accessible name
             (WCAG 4.1.2). A real <label> also makes the text a click target. */}
-        <label className="slider-label" htmlFor="discoverability">
-          discoverability
-        </label>
-        <input
-          id="discoverability"
-          type="range"
-          min="0"
-          max="1"
-          step="0.05"
-          value={value}
-          aria-valuetext={valueText(value)}
-          aria-describedby="discoverability-hint"
-          onChange={(e) => onChange(parseFloat(e.target.value))}
-        />
-        <span className="slider-value" aria-hidden="true">
-          {Math.round(value * 100)}%
+        <span className="slider-heading">
+          <label className="slider-label" htmlFor="discoverability">
+            discoverability
+          </label>
+          <span className="slider-value" aria-hidden="true">
+            {Math.round(value * 100)}%
+          </span>
         </span>
-      </div>
-      <div className="slider-labels" id="discoverability-hint">
-        <span>popular creators are fine</span>
-        <span>surface small/new creators only</span>
+        <div className="slider-track">
+          <input
+            id="discoverability"
+            type="range"
+            min="0"
+            max="1"
+            step="0.05"
+            value={value}
+            aria-valuetext={valueText(value)}
+            aria-describedby="discoverability-hint"
+            onChange={(e) => onChange(parseFloat(e.target.value))}
+          />
+          <div className="slider-labels" id="discoverability-hint">
+            <span>popular creators</span>
+            <span>small creators</span>
+          </div>
+        </div>
       </div>
     </div>
   );

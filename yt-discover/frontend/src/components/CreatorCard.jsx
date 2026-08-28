@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 function formatSubs(n) {
   if (n == null) return "— subs";
   const num = Number(n);
@@ -17,8 +19,30 @@ function spokenSubs(n) {
   return `${num} subscribers`;
 }
 
+/** The channel avatar comes from yt3.ggpht.com, which 429s on hotlinked
+ *  requests that carry a Referer header. referrerPolicy strips that; onError
+ *  falls back to an initials bubble so a throttled or missing avatar doesn't
+ *  leave a broken-image glyph next to the channel name. */
+function ChannelThumb({ url, name }) {
+  const [failed, setFailed] = useState(false);
+
+  if (!url || failed) {
+    const initial = (name?.trim()?.[0] ?? "?").toUpperCase();
+    return <span className="channel-thumb-fallback" aria-hidden="true">{initial}</span>;
+  }
+
+  return (
+    <img
+      src={url}
+      alt=""
+      referrerPolicy="no-referrer"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 export default function CreatorCard({ result, feedbackState, onFeedback }) {
-  const { video, channelId, channelTitle, channelThumbnail, subscriberCount, score, reason, alreadySubscribed, beyondSizePreference, features } = result;
+  const { video, channelId, channelTitle, channelThumbnail, subscriberCount, alreadySubscribed, beyondSizePreference, features } = result;
 
   // Every card previously exposed two buttons named just "Like" and "Not for
   // me". With 30 cards on screen that's 60 controls with 30 duplicate
@@ -36,16 +60,16 @@ export default function CreatorCard({ result, feedbackState, onFeedback }) {
         rel="noreferrer"
         aria-label={`Watch ${describes}. ${spokenSubs(subscriberCount)}.${
           beyondSizePreference ? " Larger than your discoverability setting asked for." : ""
-        } Match score ${score.toFixed(2)} out of 1. ${reason}. Opens in a new tab.`}
+        } Opens in a new tab.`}
       >
         <div className="thumb-wrap">
           {/* alt="" is correct: the thumbnail is decorative here, and the
-              title sits right beside it as the real content. */}
-          {video.thumbnail && <img src={video.thumbnail} alt="" loading="lazy" />}
-          {/* Already spoken as "Match score …" in the link's accessible
-              name above; left visible for sighted users, hidden from the
-              accessibility tree so it isn't read as a bare "0.42". */}
-          <span className="score-badge" aria-hidden="true">{score.toFixed(2)}</span>
+              title sits right beside it as the real content.
+              referrerPolicy: YouTube's image CDNs (i.ytimg.com, yt3.ggpht.com)
+              return HTTP 429 for hotlinked requests carrying a Referer header. */}
+          {video.thumbnail && (
+            <img src={video.thumbnail} alt="" loading="lazy" referrerPolicy="no-referrer" />
+          )}
         </div>
         <div className="card-body">
           {/* Both badges are already spoken in the link's accessible name
@@ -57,35 +81,50 @@ export default function CreatorCard({ result, feedbackState, onFeedback }) {
           )}
           <div className="video-title">{video.title}</div>
           <div className="channel-row">
-            {channelThumbnail && <img src={channelThumbnail} alt="" />}
+            <ChannelThumb url={channelThumbnail} name={channelTitle} />
             <span className="channel-name">{channelTitle}</span>
             <span className="subs" aria-hidden="true">{formatSubs(subscriberCount)}</span>
           </div>
-          <div className="reason">{reason}</div>
         </div>
       </a>
-      <div className="feedback-row">
-        <button
-          type="button"
-          className={`feedback-btn like${feedbackState === "liked" ? " active" : ""}`}
-          disabled={feedbackState != null}
-          aria-pressed={feedbackState === "liked"}
-          aria-label={`Like ${describes}`}
-          onClick={() => onFeedback(video.id, channelId, features, 1, video.title)}
-        >
-          Like
-        </button>
-        <button
-          type="button"
-          className={`feedback-btn dismiss${feedbackState === "dismissed" ? " active" : ""}`}
-          disabled={feedbackState != null}
-          aria-pressed={feedbackState === "dismissed"}
-          aria-label={`Not for me: ${describes}`}
-          onClick={() => onFeedback(video.id, channelId, features, 0, video.title)}
-        >
-          Not for me
-        </button>
-      </div>
+      {feedbackState ? (
+        <div className="feedback-row feedback-done" role="status">
+          <ThumbsUpIcon />
+          thanks for the feedback
+        </div>
+      ) : (
+        <div className="feedback-row">
+          <button
+            type="button"
+            className="feedback-btn like"
+            aria-label={`Like ${describes}`}
+            onClick={() => onFeedback(video.id, channelId, features, 1, video.title)}
+          >
+            Like
+          </button>
+          <button
+            type="button"
+            className="feedback-btn dismiss"
+            aria-label={`Not for me: ${describes}`}
+            onClick={() => onFeedback(video.id, channelId, features, 0, video.title)}
+          >
+            Not for me
+          </button>
+        </div>
+      )}
     </article>
+  );
+}
+
+function ThumbsUpIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+      <path
+        d="M7 10v10H4a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1h3Zm0 0 4.5-7a2 2 0 0 1 2 2v3h5.2a2 2 0 0 1 2 2.4l-1.4 7A2 2 0 0 1 16.5 20H7"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }

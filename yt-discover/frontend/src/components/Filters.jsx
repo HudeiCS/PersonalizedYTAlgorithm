@@ -1,9 +1,9 @@
 const DURATION_OPTIONS = [
   { value: "any", label: "Any length" },
-  { value: "under1", label: "Under 1 min" },
-  { value: "under5", label: "Under 5 min" },
-  { value: "under10", label: "Under 10 min" },
-  { value: "over10", label: "Over 10 min" },
+  { value: "under1", label: "< 1 min" },
+  { value: "under5", label: "< 5 min" },
+  { value: "under10", label: "< 10 min" },
+  { value: "over10", label: "> 10 min" },
 ];
 
 const AGE_OPTIONS = [
@@ -59,7 +59,7 @@ export default function Filters({ value, onChange, showSubscriptionsToggle }) {
           checked={value.includeShorts}
           onChange={(e) => set("includeShorts", e.target.checked)}
         />
-        <label htmlFor="filter-shorts">Include Shorts</label>
+        <label htmlFor="filter-shorts">Shorts</label>
       </div>
 
       {showSubscriptionsToggle && (
@@ -70,7 +70,7 @@ export default function Filters({ value, onChange, showSubscriptionsToggle }) {
             checked={value.useSubscriptions}
             onChange={(e) => set("useSubscriptions", e.target.checked)}
           />
-          <label htmlFor="filter-subscriptions">Factor in my subscriptions</label>
+          <label htmlFor="filter-subscriptions">Factor in Subscriptions</label>
         </div>
       )}
     </fieldset>

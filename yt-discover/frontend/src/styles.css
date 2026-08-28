@@ -169,15 +169,18 @@ button {
   font-weight: 400;
 }
 
-/* ---- Hero / signature mesh divider ---------------------------------
-   The signature element: a "sieve mesh" made of a repeating dot grid where
-   gold dots (matches) fall lower than gray dots (noise) — a static visual
-   metaphor for the filtering the algorithm performs, sitting right above
-   the input.
-------------------------------------------------------------------------- */
+/* ---- Hero ---------------------------------------------------------- */
 
 .hero {
-  padding: 32px 0 8px;
+  position: relative;
+  padding: 32px 0 44px;
+  margin-bottom: 32px;
+}
+
+.hero h1,
+.hero p {
+  position: relative;
+  z-index: 1;
 }
 
 .hero h1 {
@@ -197,25 +200,47 @@ button {
   margin: 0 0 32px;
 }
 
-.mesh {
-  position: relative;
-  height: 46px;
-  margin: 8px 0 40px;
-  background-image:
-    radial-gradient(circle, var(--border) 1.4px, transparent 1.4px);
-  background-size: 18px 18px;
-  opacity: 0.9;
-}
-.mesh::after {
-  content: "";
+/* ---- Hero diamond ribbon ---------------------------------------------
+   A large ribbon of tiny gold diamonds cascading down the empty space to
+   the right of the hero copy. The SVG mask clips the diamond mesh to a
+   wavy band; the mesh translates on a loop so the diamonds appear to flow.
+   The wrapper is clipped and sits at z-index -1, behind the text and behind
+   every opaque panel, so the ribbon never covers a box. Off on narrow
+   screens and under reduced-motion. */
+.ribbon-wrap {
   position: absolute;
-  inset: 0;
-  background-image: radial-gradient(circle, var(--gold) 1.6px, transparent 1.6px);
-  background-size: 18px 18px;
-  background-position: 0 22px;
-  -webkit-mask-image: linear-gradient(90deg, transparent, black 20%, black 45%, transparent 65%);
-  mask-image: linear-gradient(90deg, transparent, black 20%, black 45%, transparent 65%);
-  opacity: 0.8;
+  top: -110px;
+  right: 0;
+  width: 720px;
+  height: 545px;
+  color: var(--gold);
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 0;
+  /* clean horizontal fade at the bottom so the ribbon dissolves into the
+     gap above the panel rather than meeting its edge */
+  -webkit-mask-image: linear-gradient(to bottom, #000 74%, transparent 97%);
+  mask-image: linear-gradient(to bottom, #000 74%, transparent 97%);
+}
+/* Lift the real content above the ribbon so it only ever shows in empty
+   space — never over the header controls or a panel. */
+.topbar,
+.shell > section,
+.shell > .panel {
+  position: relative;
+  z-index: 1;
+}
+.ribbon {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+@media (max-width: 1000px) {
+  .ribbon-wrap { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ribbon-wrap { display: none; }
 }
 
 /* ---- Cards / surfaces ------------------------------------------------ */
@@ -248,13 +273,6 @@ button {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   margin-bottom: 8px;
-}
-
-.field-hint {
-  font-size: 12px;
-  color: var(--text-muted);
-  line-height: 1.5;
-  margin: 8px 0 0;
 }
 
 /* ---- Genre chips input ------------------------------------------------ */
@@ -342,20 +360,40 @@ button {
 }
 .suggestion-btn:hover { border-color: var(--gold-dim); color: var(--gold); }
 
+.suggestion-btn.surprise {
+  border-style: solid;
+  border-color: var(--gold-dim);
+  color: var(--gold);
+}
+.suggestion-btn.surprise:hover { border-color: var(--gold); background: rgba(232, 179, 77, 0.1); }
+
 /* ---- Discoverability slider -------------------------------------- */
 
 .slider-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 16px;
   margin-top: 20px;
 }
-.slider-row input[type="range"] {
+.slider-track {
   flex: 1;
+}
+.slider-track input[type="range"] {
+  width: 100%;
+  display: block;
   accent-color: var(--gold);
   /* 2.5.8 Target Size — a bare range track is a thin hit area; this keeps
      the draggable region a comfortable height without changing the look. */
   min-height: 24px;
+}
+.slider-heading {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  flex-shrink: 0;
+  /* nudge the label down so it lines up with the slider thumb rather than
+     the top of the track + labels stack */
+  margin-top: 3px;
 }
 .slider-label {
   font-family: var(--font-mono);
@@ -367,8 +405,6 @@ button {
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--gold);
-  min-width: 38px;
-  text-align: right;
 }
 .slider-labels {
   display: flex;
@@ -376,7 +412,7 @@ button {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-muted);
-  margin-top: 6px;
+  margin-top: 2px;
 }
 
 /* ---- Filters -------------------------------------------------------- */
@@ -461,6 +497,10 @@ button {
 /* ---- Buttons ----------------------------------------------------- */
 
 .btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   background: var(--gold);
   color: #1a1305;
   border: none;
@@ -473,6 +513,17 @@ button {
 .btn-primary:hover { background: #f0bf63; }
 .btn-primary:active { transform: scale(0.98); }
 .btn-primary:disabled { opacity: 0.5; cursor: default; }
+/* While a Refresh search is running, drop the gold fill so "Find creators"
+   reads as temporarily inactive. */
+.btn-primary.is-muted {
+  background: var(--surface-raised);
+  color: var(--text-muted);
+}
+.btn-primary.is-muted:hover { background: var(--surface-raised); }
+.btn-primary[aria-busy="true"] svg { animation: spin 0.8s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .btn-primary[aria-busy="true"] svg { animation: none; }
+}
 
 .btn-ghost {
   background: transparent;
@@ -498,42 +549,123 @@ button {
 }
 .btn-google:hover { border-color: var(--cyan); }
 
-/* ---- Auth banner ---------------------------------------------------- */
+/* ---- Account menu (top-right of header) ---------------------------- */
 
-.auth-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+.account {
+  position: relative;
+  flex-shrink: 0;
 }
-.user-chip {
-  display: flex;
+
+.account-trigger {
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
-}
-.user-chip img {
-  width: 30px; height: 30px; border-radius: 50%;
+  gap: 8px;
+  background: var(--surface-raised);
   border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 6px 14px 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
 }
-.user-chip .name { font-size: 14px; font-weight: 500; }
-.user-chip .scope-note {
+.account-trigger:hover { border-color: var(--gold-dim); }
+.account-trigger[aria-expanded="true"] { border-color: var(--gold-dim); }
+
+/* Signed out: this is the primary call to action in the header, so give it
+   the same gold fill as the main button rather than the muted pill look. */
+.account-trigger:not(.is-signed-in) {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: #1a1305;
+  font-weight: 600;
+  padding: 9px 18px;
+}
+.account-trigger:not(.is-signed-in):hover { background: #f0bf63; border-color: #f0bf63; }
+.account-trigger:not(.is-signed-in)[aria-expanded="true"] { background: #f0bf63; border-color: #f0bf63; }
+
+/* Signed in: collapse to a bare circular avatar button. */
+.account-trigger.is-signed-in {
+  padding: 3px;
+  border-radius: 50%;
+  gap: 0;
+}
+.account-trigger img,
+.account-trigger .avatar-fallback {
+  width: 30px; height: 30px; border-radius: 50%;
+  display: block;
+}
+.account-trigger .avatar-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--gold-dim);
+  color: var(--gold);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.account-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  width: 264px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.account-menu-head {
+  padding: 8px 10px 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 6px;
+}
+.account-menu-head .name { font-size: 14px; font-weight: 600; }
+.account-menu-head .email {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-muted);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.consent-notice {
-  font-size: 13px;
+.account-menu-item {
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 13.5px;
+  padding: 9px 10px;
+  border-radius: 6px;
+}
+.account-menu-item:hover { background: var(--surface-raised); }
+.account-menu-item.danger { color: var(--danger); }
+
+.account-menu-note {
+  font-size: 12.5px;
   color: var(--text-muted);
   line-height: 1.5;
-  margin-top: 10px;
+  margin: 4px 6px 10px;
 }
-.consent-notice code {
+.account-menu-note code {
   font-family: var(--font-mono);
   background: var(--surface-raised);
   padding: 1px 5px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 11px;
+}
+.account-menu .btn-google {
+  justify-content: center;
+  width: 100%;
 }
 
 /* ---- Results grid --------------------------------------------------- */
@@ -542,13 +674,49 @@ button {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 14px;
   margin: 40px 0 16px;
+}
+.results-header-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 .results-header h2 {
   font-family: var(--font-display);
   font-size: 18px;
   margin: 0;
   color: var(--text);
+}
+.btn-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(232, 179, 77, 0.12);
+  border: 1px solid var(--gold);
+  color: var(--gold);
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 12px;
+  padding: 5px 13px;
+  border-radius: 999px;
+  line-height: 1;
+}
+.btn-refresh:hover:not(:disabled) { background: rgba(232, 179, 77, 0.22); }
+.btn-refresh:disabled { opacity: 0.5; cursor: default; }
+/* While a "Find creators" search is running, drop the gold accent so the
+   refresh button reads as temporarily inactive. */
+.btn-refresh.is-muted {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+.btn-refresh[aria-busy="true"] svg { animation: spin 0.8s linear infinite; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .btn-refresh[aria-busy="true"] svg { animation: none; }
 }
 .pool-note {
   font-family: var(--font-mono);
@@ -638,18 +806,6 @@ button {
 }
 .thumb-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
-.score-badge {
-  position: absolute;
-  top: 8px; right: 8px;
-  background: rgba(15,17,21,0.85);
-  border: 1px solid var(--gold-dim);
-  color: var(--gold);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  padding: 3px 7px;
-  border-radius: 6px;
-}
-
 .card-body { padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
 
 .card-body .video-title {
@@ -669,19 +825,20 @@ button {
   gap: 8px;
   margin-top: 2px;
 }
-.channel-row img { width: 22px; height: 22px; border-radius: 50%; }
+.channel-row img,
+.channel-row .channel-thumb-fallback { width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0; }
+.channel-row .channel-thumb-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--gold-dim);
+  color: var(--gold);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+}
 .channel-row .channel-name { font-size: 13px; color: var(--text-muted); }
 .channel-row .subs { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); margin-left: auto; }
-
-.reason {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--cyan);
-  line-height: 1.5;
-  margin-top: auto;
-  padding-top: 8px;
-  border-top: 1px dashed var(--border);
-}
 
 .badge-new {
   display: inline-block;
@@ -731,18 +888,20 @@ button {
 .feedback-btn + .feedback-btn {
   border-left: 1px solid var(--border);
 }
-.feedback-btn:disabled {
-  cursor: default;
+.feedback-btn.like:hover { color: var(--cyan); }
+.feedback-btn.dismiss:hover { color: var(--danger); }
+
+.feedback-done {
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 10px 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--gold);
 }
-.feedback-btn.like:hover:not(:disabled) { color: var(--cyan); }
-.feedback-btn.dismiss:hover:not(:disabled) { color: var(--danger); }
-.feedback-btn.like.active {
-  color: var(--cyan);
-  background: rgba(95, 212, 208, 0.08);
-}
-.feedback-btn.dismiss.active {
-  color: var(--danger);
-  background: rgba(224, 108, 108, 0.08);
+.feedback-done svg {
+  flex-shrink: 0;
 }
 
 /* ---- Subscriptions strip -------------------------------------------- */
@@ -772,16 +931,8 @@ button {
 }
 .status-text.error { color: var(--danger); }
 
-.footer-note {
-  margin-top: 64px;
-  padding-top: 24px;
-  border-top: 1px solid var(--border);
-  color: var(--text-muted);
-  font-size: 12px;
-  font-family: var(--font-mono);
-  line-height: 1.6;
-}
-
 @media (max-width: 640px) {
-  .auth-row { flex-direction: column; align-items: flex-start; }
+  .topbar { padding: 20px 16px 16px; }
+  .account-trigger.is-signed-in { padding: 3px; }
+  .account-menu { width: calc(100vw - 32px); max-width: 264px; }
 }

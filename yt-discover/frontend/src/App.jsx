@@ -39,6 +39,20 @@ function coverageNote({
   return parts.join(" · ");
 }
 
+/** Three starter chips drawn from the user's subscribed channel names, spaced
+ *  out across the list so they're not all near-duplicates. Overlong names are
+ *  skipped so a chip stays chip-sized. Returns [] if there isn't enough to
+ *  work with, which signals GenrePicker to use its generic list. */
+function topicsFromSubs(subs) {
+  const titles = (subs ?? [])
+    .map((s) => (s.title || "").trim().toLowerCase())
+    .filter((t) => t.length >= 2 && t.length <= 28);
+  const unique = [...new Set(titles)];
+  if (unique.length < 3) return [];
+  const step = Math.floor(unique.length / 3);
+  return [unique[0], unique[step], unique[step * 2]];
+}
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
@@ -52,6 +66,9 @@ export default function App() {
   });
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
+  // Which control kicked off the current search: "find" or "refresh". Drives
+  // where the spinner shows and which of the two buttons greys out.
+  const [loadingSource, setLoadingSource] = useState(null);
   const [error, setError] = useState(null);
   const [authNotice, setAuthNotice] = useState(null);
   const [poolMeta, setPoolMeta] = useState(null);
@@ -60,6 +77,10 @@ export default function App() {
   // only confirmation a click landed is a colour change, which a screen
   // reader user never perceives.
   const [feedbackAnnouncement, setFeedbackAnnouncement] = useState("");
+  // Starter suggestion chips drawn from the signed-in user's own subscriptions
+  // (empty when signed out, which makes GenrePicker fall back to its generic
+  // list). Fetched once per session; a failure just leaves it generic.
+  const [suggestedTopics, setSuggestedTopics] = useState([]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -79,17 +100,23 @@ export default function App() {
         setUser(user);
         if (user.genres?.length) setGenres(user.genres);
         if (user.discoverability != null) setDiscoverability(user.discoverability);
+        api
+          .subscriptions()
+          .then(({ subscriptions }) => setSuggestedTopics(topicsFromSubs(subscriptions)))
+          .catch(() => {});
       } else {
         setUser(null);
+        setSuggestedTopics([]);
       }
     } finally {
       setCheckingAuth(false);
     }
   }
 
-  async function handleFind() {
+  async function handleFind(source = "find") {
     if (genres.length === 0) return;
     setLoading(true);
+    setLoadingSource(source);
     setError(null);
     try {
       if (user) api.savePreferences(genres, discoverability).catch(() => {});
@@ -106,6 +133,7 @@ export default function App() {
       setResults(null);
     } finally {
       setLoading(false);
+      setLoadingSource(null);
     }
   }
 
@@ -151,20 +179,24 @@ export default function App() {
           Sift
           <span className="tagline">creator discoverability engine</span>
         </div>
+        {!checkingAuth && <AuthPanel user={user} onLoggedOut={() => { setUser(null); }} />}
       </header>
 
       <main className="shell" id="main-content">
         <div className="hero">
+          {/* Decorative: a large ribbon of small gold diamonds cascading
+              through the empty space to the right of the hero copy. Ambient
+              only, hidden from assistive tech, off under reduced-motion, and
+              clipped so it never reaches the panels below. */}
+          <DiamondRibbon />
           <h1>Find the creators the algorithm buries.</h1>
           <p>
-            Type the kind of videos you're after — a genre, a game, an edit
-            style — and Sift builds a taste profile from that plus your real
-            subscriptions, then ranks creators on topic fit, engagement, and
-            how likely you are to have already seen them.
+            Tell Sift a few things you like to watch, such as a genre, a game,
+            or an editing style. It uses that along with the channels you
+            already follow to find videos from creators you'd probably enjoy
+            but haven't come across yet.
           </p>
         </div>
-
-        <div className="mesh" aria-hidden="true" />
 
         {authNotice === "declined" && (
           <Notice tone="muted">You declined the Google consent screen — no problem, genre-only discovery still works below.</Notice>
@@ -174,30 +206,27 @@ export default function App() {
           <Notice tone="error">Google didn't grant the YouTube read scope, so we can't read subscriptions. Try signing in again and approving that permission.</Notice>
         )}
 
-        {!checkingAuth && <AuthPanel user={user} onLoggedOut={() => { setUser(null); }} />}
-
         <section className="panel" aria-labelledby="search-heading">
           <h2 id="search-heading">What are you in the mood for?</h2>
-          <GenrePicker genres={genres} onChange={setGenres} />
+          <GenrePicker genres={genres} onChange={setGenres} suggestedTopics={suggestedTopics} />
           <DiscoverabilitySlider value={discoverability} onChange={setDiscoverability} />
           <Filters value={filters} onChange={setFilters} showSubscriptionsToggle={!!user} />
           <div className="search-actions">
             <button
               type="button"
-              className="btn-primary"
-              onClick={handleFind}
+              className={`btn-primary${loadingSource === "refresh" ? " is-muted" : ""}`}
+              onClick={() => handleFind("find")}
               disabled={genres.length === 0 || loading}
-              aria-busy={loading}
+              aria-busy={loadingSource === "find"}
               aria-describedby="find-hint"
             >
-              {loading ? "Sifting..." : "Find creators"}
+              {loadingSource === "find" && <RefreshIcon />}
+              {loadingSource === "find" ? "Sifting..." : "Find creators"}
             </button>
             <span id="find-hint" className="search-hint">
               {genres.length === 0
                 ? "Add at least one topic above to search."
-                : user
-                  ? `Blending ${genres.length} topic${genres.length === 1 ? "" : "s"} with your subscriptions.`
-                  : `Searching ${genres.length} topic${genres.length === 1 ? "" : "s"}.`}
+                : `Searching ${genres.length} topic${genres.length === 1 ? "" : "s"}.`}
             </span>
           </div>
         </section>
@@ -214,11 +243,24 @@ export default function App() {
           {results && (
             <>
               <div className="results-header">
-                <h2>Ranked results</h2>
+                <div className="results-header-title">
+                  <h2>Ranked results</h2>
+                  <button
+                    type="button"
+                    className={`btn-refresh${loading && loadingSource !== "refresh" ? " is-muted" : ""}`}
+                    onClick={() => handleFind("refresh")}
+                    disabled={loading || genres.length === 0}
+                    aria-busy={loadingSource === "refresh"}
+                    aria-label="Refresh results — run the search again for a new set of creators"
+                  >
+                    <RefreshIcon />
+                    {loadingSource === "refresh" ? "Refreshing…" : "Refresh"}
+                  </button>
+                </div>
                 {poolMeta && (
                   <span className="pool-note">
                     scored {poolMeta.size} candidates
-                    {poolMeta.usedSubscriptions ? " · using your subscriptions" : " · genre-only (not signed in)"}
+                    {poolMeta.usedSubscriptions ? " · using your subscriptions" : " · genre-only"}
                   </span>
                 )}
               </div>
@@ -257,20 +299,91 @@ export default function App() {
             </>
           )}
         </section>
-
-        <footer className="footer-note">
-          {poolMeta?.usingLearnedWeights ? (
-            <>scoring uses weights learned from your like/dismiss feedback, blending the same four
-            signals below in proportions the model found rather than ones set by hand.<br /></>
-          ) : (
-            <>scoring = 0.45 × topic-match + 0.15 × engagement + 0.10 × freshness + 0.30 × discoverability<br /></>
-          )}
-          topic-match is cosine similarity between your typed genres/subscriptions and each candidate's
-          title, description, tags and channel bio. discoverability weights small/unsubscribed
-          channels higher as you move the slider right.
-        </footer>
       </main>
     </>
+  );
+}
+
+// One shared curve for the ribbon: it enters top-right, then cascades down
+// the empty right-hand column in a few undulations. Kept clear of the text
+// column, and the wrapper clips + sits behind everything so it never touches
+// the panels.
+const RIBBON_PATH =
+  "M700 -14 C610 40 520 60 560 118 C600 175 690 175 665 235 C640 295 500 280 495 340 C490 400 590 405 578 450 C566 495 460 490 460 528 C460 560 520 566 548 604";
+
+function DiamondRibbon() {
+  return (
+    <div className="ribbon-wrap" aria-hidden="true">
+      <svg className="ribbon" width="720" height="600" viewBox="0 0 720 600" fill="none">
+        <defs>
+          <pattern id="ribDiamonds" width="11" height="11" patternUnits="userSpaceOnUse">
+            <rect x="3.7" y="3.7" width="3.6" height="3.6" fill="currentColor" transform="rotate(45 5.5 5.5)" />
+          </pattern>
+          <linearGradient id="ribFade" x1="0.3" y1="0" x2="0.62" y2="1">
+            <stop offset="0" stopColor="#fff" stopOpacity="0" />
+            <stop offset="0.16" stopColor="#fff" stopOpacity="1" />
+            <stop offset="1" stopColor="#fff" stopOpacity="1" />
+          </linearGradient>
+          <mask id="ribBand" maskUnits="userSpaceOnUse">
+            <path d={RIBBON_PATH} stroke="url(#ribFade)" strokeWidth="120" strokeLinecap="round" fill="none" />
+          </mask>
+          <filter id="ribGlow" x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="17" />
+          </filter>
+        </defs>
+
+        {/* soft glowing body of the ribbon */}
+        <path
+          d={RIBBON_PATH}
+          stroke="currentColor"
+          strokeWidth="66"
+          strokeLinecap="round"
+          fill="none"
+          opacity="0.16"
+          filter="url(#ribGlow)"
+        />
+
+        {/* the diamond mesh, clipped to the ribbon band and cascading */}
+        <g mask="url(#ribBand)" opacity="0.72">
+          <g>
+            <animateTransform
+              attributeName="transform"
+              type="translate"
+              from="0 -11"
+              to="-11 0"
+              dur="2.6s"
+              repeatCount="indefinite"
+            />
+            <rect x="-44" y="-44" width="880" height="660" fill="url(#ribDiamonds)" />
+          </g>
+        </g>
+
+        {/* faint bright thread down the centre of the ribbon */}
+        <path
+          d={RIBBON_PATH}
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          fill="none"
+          opacity="0.3"
+          mask="url(#ribBand)"
+        />
+      </svg>
+    </div>
+  );
+}
+
+function RefreshIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+      <path
+        d="M20 11a8 8 0 1 0-.6 3M20 5v6h-6"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 

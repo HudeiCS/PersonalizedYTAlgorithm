@@ -1,68 +1,147 @@
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 
+/** Account control that lives in the top-right of the header. Signed out it's
+ *  a compact "Sign in" pill; signed in it's a circular avatar button. Both open
+ *  the same small dropdown — disclosure + Google button when signed out,
+ *  account actions when signed in — so the header stays uncluttered. */
 export default function AuthPanel({ user, onLoggedOut }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    }
+    function onKey(e) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
   async function handleRevoke() {
     await api.revoke();
+    setOpen(false);
     onLoggedOut();
   }
   async function handleLogout() {
     await api.logout();
+    setOpen(false);
     onLoggedOut();
   }
 
-  if (!user) {
-    return (
-      <section className="panel" aria-labelledby="auth-heading">
-        <h2 id="auth-heading">Connect your YouTube account</h2>
-        <div className="auth-row">
-          <p style={{ margin: 0, color: "var(--text-muted)", fontSize: 14, maxWidth: 420 }}>
-            Optional. Sign in and we'll blend your existing subscriptions into
-            the taste profile so recommendations aren't just keyword matches.
-          </p>
-          <a className="btn-google" href={api.loginUrl()} aria-describedby="consent-notice">
-            <GoogleMark /> Sign in with Google
-          </a>
+  return (
+    <div className="account" ref={wrapRef}>
+      <button
+        type="button"
+        className={`account-trigger${user ? " is-signed-in" : ""}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={user ? `Account menu for ${user.name}` : "Sign in"}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {user ? (
+          <Avatar url={user.avatarUrl} name={user.name} />
+        ) : (
+          <>
+            <PersonIcon />
+            <span className="account-trigger-label">Sign in</span>
+          </>
+        )}
+      </button>
+
+      {open && (
+        <div className="account-menu" role="menu" aria-label="Account">
+          {user ? (
+            <>
+              <div className="account-menu-head">
+                <div className="name">{user.name}</div>
+                {user.email && <div className="email">{user.email}</div>}
+              </div>
+              <button type="button" role="menuitem" className="account-menu-item" onClick={handleLogout}>
+                Sign out
+              </button>
+              {/* "Revoke" and "Sign out" read almost alike; spelling out the
+                  consequence keeps the destructive one from being picked by
+                  mistake from a screen reader's menu-item list. */}
+              <button
+                type="button"
+                role="menuitem"
+                className="account-menu-item danger"
+                onClick={handleRevoke}
+                aria-label="Revoke access — permanently disconnect this app from your Google account"
+              >
+                Revoke access
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="account-menu-note">
+                Optional. Sign in and we'll blend your existing subscriptions
+                into the taste profile so recommendations aren't just keyword
+                matches. Google's own consent screen requests only{" "}
+                <code>youtube.readonly</code> and basic profile info — we never
+                post, upload, or modify anything, and you can revoke access
+                anytime from here.
+              </p>
+              <a className="btn-google" href={api.loginUrl()} role="menuitem">
+                <GoogleMark /> Continue with Google
+              </a>
+            </>
+          )}
         </div>
-        <p className="consent-notice" id="consent-notice">
-          You'll see Google's own consent screen next, requesting only{" "}
-          <code>youtube.readonly</code> (your subscriptions and public
-          channel data) and basic profile info. We never post, upload, or
-          modify anything on your account, and you can revoke access anytime
-          from this page or from your Google Account settings.
-        </p>
-      </section>
+      )}
+    </div>
+  );
+}
+
+function initialsOf(name) {
+  if (!name) return "?";
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? "")
+    .join("");
+}
+
+/** Google serves profile photos from lh3.googleusercontent.com, which returns
+ *  HTTP 429 for hotlinked requests that carry a Referer header. referrerPolicy
+ *  strips that; onError falls back to an initials bubble so a throttled or
+ *  missing photo degrades gracefully instead of rendering blank. */
+function Avatar({ url, name }) {
+  const [failed, setFailed] = useState(false);
+
+  if (!url || failed) {
+    return (
+      <span className="avatar-fallback" aria-hidden="true">
+        {initialsOf(name)}
+      </span>
     );
   }
 
   return (
-    <section className="panel" aria-label="Signed-in account">
-      <div className="auth-row">
-        <div className="user-chip">
-          {user.avatarUrl && <img src={user.avatarUrl} alt="" />}
-          <div>
-            <div className="name">{user.name}</div>
-            <div className="scope-note">granted: youtube.readonly · profile · email</div>
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button type="button" className="btn-ghost" onClick={handleLogout}>
-            Sign out
-          </button>
-          {/* "Revoke" and "Sign out" sit side by side and read almost alike;
-              spelling out the consequence keeps the destructive one from
-              being picked by mistake from a screen reader's button list. */}
-          <button
-            type="button"
-            className="btn-ghost"
-            onClick={handleRevoke}
-            style={{ color: "var(--danger)" }}
-            aria-label="Revoke access — permanently disconnect this app from your Google account"
-          >
-            Revoke access
-          </button>
-        </div>
-      </div>
-    </section>
+    <img
+      src={url}
+      alt=""
+      referrerPolicy="no-referrer"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+function PersonIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" focusable="false">
+      <circle cx="12" cy="8" r="3.4" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M5.5 19c1.2-3 3.6-4.5 6.5-4.5s5.3 1.5 6.5 4.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
   );
 }
 
