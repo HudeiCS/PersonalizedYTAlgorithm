@@ -1,10 +1,14 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { api } from "./api";
 import GenrePicker from "./components/GenrePicker.jsx";
 import DiscoverabilitySlider from "./components/DiscoverabilitySlider.jsx";
 import Filters from "./components/Filters.jsx";
 import AuthPanel from "./components/AuthPanel.jsx";
 import CreatorCard from "./components/CreatorCard.jsx";
+
+// Lazy so three.js stays out of the main bundle. The hero section's height
+// is reserved in CSS, so nothing shifts while the chunk loads.
+const HeroRibbon = lazy(() => import("./components/HeroRibbon.jsx"));
 
 /** Turns one genre's coverage stats into an honest plain-English summary.
  *  The backend's backfill ladder can pad a thin topic out to a full page by
@@ -182,22 +186,30 @@ export default function App() {
         {!checkingAuth && <AuthPanel user={user} onLoggedOut={() => { setUser(null); }} />}
       </header>
 
-      <main className="shell" id="main-content">
-        <div className="hero">
-          {/* Decorative: a large ribbon of small gold diamonds cascading
-              through the empty space to the right of the hero copy. Ambient
-              only, hidden from assistive tech, off under reduced-motion, and
-              clipped so it never reaches the panels below. */}
-          <DiamondRibbon />
-          <h1>Find the creators the algorithm buries.</h1>
-          <p>
-            Tell Sift a few things you like to watch, such as a genre, a game,
-            or an editing style. It uses that along with the channels you
-            already follow to find videos from creators you'd probably enjoy
-            but haven't come across yet.
-          </p>
-        </div>
+      <main id="main-content">
+        {/* Decorative shader ribbon: a see-through mesh of favicon diamonds
+            sweeping from the left edge up toward the top right, behind the
+            hero copy and the top of the UI. Hidden from assistive tech;
+            frozen to one frame under reduced-motion; paused offscreen and
+            on hidden tabs; static gradient fallback without WebGL. All
+            tunables live in the config object at the top of HeroRibbon.jsx. */}
+        <Suspense fallback={null}>
+          <HeroRibbon />
+        </Suspense>
 
+        <section className="hero-viewport">
+          <div className="hero-copy">
+            <h1>Find the creators the algorithm buries.</h1>
+            <p>
+              Tell Sift a few things you like to watch, such as a genre, a game,
+              or an editing style. It uses that along with the channels you
+              already follow to find videos from creators you'd probably enjoy
+              but haven't come across yet.
+            </p>
+          </div>
+        </section>
+
+        <div className="shell">
         {authNotice === "declined" && (
           <Notice tone="muted">You declined the Google consent screen — no problem, genre-only discovery still works below.</Notice>
         )}
@@ -299,77 +311,9 @@ export default function App() {
             </>
           )}
         </section>
+        </div>
       </main>
     </>
-  );
-}
-
-// One shared curve for the ribbon: it enters top-right, then cascades down
-// the empty right-hand column in a few undulations. Kept clear of the text
-// column, and the wrapper clips + sits behind everything so it never touches
-// the panels.
-const RIBBON_PATH =
-  "M700 -14 C610 40 520 60 560 118 C600 175 690 175 665 235 C640 295 500 280 495 340 C490 400 590 405 578 450 C566 495 460 490 460 528 C460 560 520 566 548 604";
-
-function DiamondRibbon() {
-  return (
-    <div className="ribbon-wrap" aria-hidden="true">
-      <svg className="ribbon" width="720" height="600" viewBox="0 0 720 600" fill="none">
-        <defs>
-          <pattern id="ribDiamonds" width="11" height="11" patternUnits="userSpaceOnUse">
-            <rect x="3.7" y="3.7" width="3.6" height="3.6" fill="currentColor" transform="rotate(45 5.5 5.5)" />
-          </pattern>
-          <linearGradient id="ribFade" x1="0.3" y1="0" x2="0.62" y2="1">
-            <stop offset="0" stopColor="#fff" stopOpacity="0" />
-            <stop offset="0.16" stopColor="#fff" stopOpacity="1" />
-            <stop offset="1" stopColor="#fff" stopOpacity="1" />
-          </linearGradient>
-          <mask id="ribBand" maskUnits="userSpaceOnUse">
-            <path d={RIBBON_PATH} stroke="url(#ribFade)" strokeWidth="120" strokeLinecap="round" fill="none" />
-          </mask>
-          <filter id="ribGlow" x="-40%" y="-40%" width="180%" height="180%">
-            <feGaussianBlur stdDeviation="17" />
-          </filter>
-        </defs>
-
-        {/* soft glowing body of the ribbon */}
-        <path
-          d={RIBBON_PATH}
-          stroke="currentColor"
-          strokeWidth="66"
-          strokeLinecap="round"
-          fill="none"
-          opacity="0.16"
-          filter="url(#ribGlow)"
-        />
-
-        {/* the diamond mesh, clipped to the ribbon band and cascading */}
-        <g mask="url(#ribBand)" opacity="0.72">
-          <g>
-            <animateTransform
-              attributeName="transform"
-              type="translate"
-              from="0 -11"
-              to="-11 0"
-              dur="2.6s"
-              repeatCount="indefinite"
-            />
-            <rect x="-44" y="-44" width="880" height="660" fill="url(#ribDiamonds)" />
-          </g>
-        </g>
-
-        {/* faint bright thread down the centre of the ribbon */}
-        <path
-          d={RIBBON_PATH}
-          stroke="currentColor"
-          strokeWidth="1.4"
-          strokeLinecap="round"
-          fill="none"
-          opacity="0.3"
-          mask="url(#ribBand)"
-        />
-      </svg>
-    </div>
   );
 }
 

@@ -20,6 +20,11 @@
   --font-display: "Space Grotesk", sans-serif;
   --font-body: "Inter", sans-serif;
   --font-mono: "JetBrains Mono", monospace;
+
+  /* One fluid side gutter shared by the header, hero, and content. The
+     layout spans the full viewport with this breathing room at the
+     edges — nothing is boxed into a centered column. */
+  --gutter: clamp(24px, 4.5vw, 84px);
 }
 
 * { box-sizing: border-box; }
@@ -91,6 +96,8 @@ button {
   outline: 2px solid var(--gold);
   outline-offset: 2px;
   border-radius: 4px;
+  /* accent-in-the-shadow: the ring casts a faint gold glow */
+  box-shadow: 0 0 16px rgba(232, 179, 77, 0.25);
 }
 
 /* The genre field is a fake input: a styled container wrapping chips and a
@@ -128,19 +135,30 @@ button {
 
 /* ---- Layout -------------------------------------------------------- */
 
+/* The working UI (search panel, results) sits in a centered column that
+   still grows with the viewport; only the topbar is full-bleed to the
+   corners. */
 .shell {
-  max-width: 1080px;
+  position: relative;
+  z-index: 1; /* above the page-ribbon canvas behind the top of the page */
+  max-width: clamp(1080px, 78vw, 1440px);
   margin: 0 auto;
-  padding: 0 24px 96px;
+  padding: 8px 24px 96px;
 }
 
+/* Floats over the hero, pinned to the real viewport corners: brand hugs
+   the top left, account the top right, with only the gutter between them
+   and the edge. */
 .topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 30;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 28px 24px 20px;
-  max-width: 1080px;
-  margin: 0 auto;
+  padding: 28px var(--gutter) 20px;
 }
 
 .brand {
@@ -169,87 +187,161 @@ button {
   font-weight: 400;
 }
 
-/* ---- Hero ---------------------------------------------------------- */
-
-.hero {
-  position: relative;
-  padding: 32px 0 44px;
-  margin-bottom: 32px;
-}
-
-.hero h1,
-.hero p {
-  position: relative;
-  z-index: 1;
-}
-
-.hero h1 {
-  font-family: var(--font-display);
-  font-size: clamp(32px, 5vw, 48px);
-  line-height: 1.05;
-  letter-spacing: -0.02em;
-  margin: 0 0 14px;
-  max-width: 620px;
-}
-
-.hero p {
-  color: var(--text-muted);
-  font-size: 16px;
-  max-width: 520px;
-  line-height: 1.55;
-  margin: 0 0 32px;
-}
-
-/* ---- Hero diamond ribbon ---------------------------------------------
-   A large ribbon of tiny gold diamonds cascading down the empty space to
-   the right of the hero copy. The SVG mask clips the diamond mesh to a
-   wavy band; the mesh translates on a loop so the diamonds appear to flow.
-   The wrapper is clipped and sits at z-index -1, behind the text and behind
-   every opaque panel, so the ribbon never covers a box. Off on narrow
-   screens and under reduced-motion. */
-.ribbon-wrap {
+/* ---- Ribbon + hero ---------------------------------------------------
+   A see-through mesh of favicon diamonds rendered by a custom GLSL
+   shader (HeroRibbon.jsx), sweeping from the left edge of the screen up
+   toward the top right. It is a page background: absolutely positioned
+   over the top stretch of the page, behind the hero copy and the upper
+   UI, which all sit at higher z-index. Heights are fixed viewport units
+   reserved up front, so there is zero layout shift whether WebGL loads,
+   falls back, or is frozen by prefers-reduced-motion. */
+.page-ribbon {
   position: absolute;
-  top: -110px;
+  top: 0;
+  left: 0;
   right: 0;
-  width: 720px;
-  height: 545px;
-  color: var(--gold);
-  pointer-events: none;
-  overflow: hidden;
+  height: 112vh;   /* fallback for browsers without svh */
+  height: 112svh;
   z-index: 0;
-  /* clean horizontal fade at the bottom so the ribbon dissolves into the
-     gap above the panel rather than meeting its edge */
-  -webkit-mask-image: linear-gradient(to bottom, #000 74%, transparent 97%);
-  mask-image: linear-gradient(to bottom, #000 74%, transparent 97%);
+  overflow: hidden;
+  pointer-events: none;
+  /* dissolve at the canvas' bottom boundary so the mesh never hard-cuts
+     mid-panel */
+  -webkit-mask-image: linear-gradient(to bottom, #000 78%, transparent 98%);
+  mask-image: linear-gradient(to bottom, #000 78%, transparent 98%);
+  /* gentle reveal when the lazy chunk lands; collapses to instant under
+     the global reduced-motion rule */
+  animation: hero-ribbon-in 1.1s ease;
 }
-/* Lift the real content above the ribbon so it only ever shows in empty
-   space — never over the header controls or a panel. */
-.topbar,
-.shell > section,
-.shell > .panel {
+@keyframes hero-ribbon-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.page-ribbon canvas { display: block; width: 100%; height: 100%; }
+
+/* No-WebGL fallback: a still diagonal band of the same material language,
+   built from layered gradients on gold alphas over the void. */
+.page-ribbon-static {
+  animation: none;
+  background:
+    linear-gradient(
+      25deg,
+      transparent 30%,
+      rgba(232, 179, 77, 0.05) 40%,
+      rgba(232, 179, 77, 0.16) 50%,
+      rgba(122, 95, 44, 0.34) 58%,
+      rgba(232, 179, 77, 0.06) 68%,
+      transparent 78%
+    ),
+    radial-gradient(55% 40% at 60% 45%, rgba(122, 95, 44, 0.22), transparent 70%);
+}
+
+.hero-viewport {
   position: relative;
   z-index: 1;
+  height: 72vh;
+  height: 72svh;
+  min-height: 480px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
 }
-.ribbon {
-  display: block;
+
+/* On narrow screens the copy spans the full width, so the scrim widens to
+   a full-bleed horizontal band behind it. */
+@media (max-width: 768px) {
+  .hero-viewport::before {
+    background: radial-gradient(
+      ellipse 130% 46% at 45% 50%,
+      rgba(15, 17, 21, 0.94) 36%,
+      rgba(15, 17, 21, 0) 100%
+    );
+  }
+}
+
+/* Hero copy aligns with the content column below it, not the full-bleed
+   topbar. */
+.hero-copy {
+  position: relative;
+  z-index: 2;
   width: 100%;
-  height: 100%;
+  max-width: clamp(1080px, 78vw, 1440px);
+  margin: 0 auto;
+  padding: 96px 24px 0;
 }
 
-@media (max-width: 1000px) {
-  .ribbon-wrap { display: none; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .ribbon-wrap { display: none; }
+/* Localized scrim pooled behind the copy zone — keeps the text at AA
+   contrast against any frame of the animation. Spans the whole hero so
+   the gradient is only ever clipped at the viewport edge, where the cut
+   is invisible; a smaller box showed its own edges as hard lines. */
+.hero-viewport::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  /* the ellipse's vertical radius stays inside the section so the
+     gradient reaches zero before the hero's bottom edge — an ellipse
+     taller than the box leaves a visible cut line there */
+  background: radial-gradient(
+    ellipse 58% 46% at 24% 50%,
+    rgba(15, 17, 21, 0.9) 26%,
+    rgba(15, 17, 21, 0) 100%
+  );
 }
 
-/* ---- Cards / surfaces ------------------------------------------------ */
+.hero-copy h1 {
+  font-family: var(--font-display);
+  font-size: clamp(38px, 6vw, 72px);
+  line-height: 1.03;
+  letter-spacing: -0.025em;
+  margin: 0 0 18px;
+  max-width: 660px;
+}
+
+.hero-copy p {
+  /* alpha tint of --text rather than --text-muted: the paragraph's lower
+     lines can drift over lit fabric, and this stays AA there where the
+     muted gray would not */
+  color: rgba(237, 238, 242, 0.82);
+  font-size: clamp(15px, 1.5vw, 17px);
+  max-width: 540px;
+  line-height: 1.6;
+  margin: 0;
+  text-shadow: 0 1px 12px rgba(15, 17, 21, 0.6);
+}
+
+
+/* ---- Cards / surfaces ------------------------------------------------
+   The hero's material carried into the details: every raised surface
+   wears the diamond weave as a whisper-alpha texture, and its top edge
+   catches a thin specular streak — the same bright thread that runs
+   along the ribbon's folds. */
 
 .panel {
-  background: var(--surface);
+  position: relative;
+  background-color: var(--surface);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14'%3E%3Crect x='4.9' y='4.9' width='4.2' height='4.2' rx='0.8' fill='%23e8b34d' fill-opacity='0.035' transform='rotate(45 7 7)'/%3E%3C/svg%3E");
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 24px;
+  overflow: hidden;
+}
+.panel::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(247, 231, 191, 0.4) 22%,
+    rgba(232, 179, 77, 0.12) 55%,
+    transparent 85%
+  );
 }
 
 .panel + .panel { margin-top: 20px; }
@@ -508,9 +600,12 @@ button {
   font-size: 14.5px;
   padding: 12px 22px;
   border-radius: 8px;
-  transition: transform 0.1s ease, background 0.15s ease;
+  transition: transform 0.1s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
-.btn-primary:hover { background: #f0bf63; }
+.btn-primary:hover {
+  background: #f0bf63;
+  box-shadow: 0 4px 20px rgba(232, 179, 77, 0.28);
+}
 .btn-primary:active { transform: scale(0.98); }
 .btn-primary:disabled { opacity: 0.5; cursor: default; }
 /* While a Refresh search is running, drop the gold fill so "Find creators"
@@ -533,7 +628,10 @@ button {
   padding: 10px 16px;
   border-radius: 8px;
 }
-.btn-ghost:hover { border-color: var(--gold-dim); }
+.btn-ghost:hover {
+  border-color: var(--gold-dim);
+  box-shadow: 0 3px 14px rgba(232, 179, 77, 0.12);
+}
 
 .btn-google {
   display: inline-flex;
@@ -616,7 +714,7 @@ button {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 8px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4), 0 2px 24px rgba(232, 179, 77, 0.07);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -670,6 +768,9 @@ button {
 
 /* ---- Results grid --------------------------------------------------- */
 
+/* The mesh's one reappearance outside the hero: a single woven row of
+   diamonds as the top edge of the results area. Kept to a thin strip so
+   the ribbon stays an event, not wallpaper. */
 .results-header {
   display: flex;
   align-items: baseline;
@@ -677,6 +778,10 @@ button {
   flex-wrap: wrap;
   gap: 8px 14px;
   margin: 40px 0 16px;
+  padding-top: 18px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Crect x='3.4' y='3.4' width='3.2' height='3.2' rx='0.6' fill='%23e8b34d' fill-opacity='0.35' transform='rotate(45 5 5)'/%3E%3C/svg%3E");
+  background-repeat: repeat-x;
+  background-position: left top;
 }
 .results-header-title {
   display: flex;
@@ -735,11 +840,24 @@ button {
   margin: 0 0 14px;
 }
 .genre-section-header h3 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
   font-family: var(--font-display);
   font-size: 15px;
   margin: 0;
   color: var(--text);
   text-transform: capitalize;
+}
+/* one diamond of the mesh, marking each topic — same mark as the brand */
+.genre-section-header h3::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 1.5px;
+  background: var(--gold-dim);
+  transform: rotate(45deg);
+  flex-shrink: 0;
 }
 .genre-count {
   font-family: var(--font-mono);
@@ -779,17 +897,20 @@ button {
 
 .creator-card {
   width: 100%;
-  background: var(--surface);
+  background-color: var(--surface);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14'%3E%3Crect x='4.9' y='4.9' width='4.2' height='4.2' rx='0.8' fill='%23e8b34d' fill-opacity='0.035' transform='rotate(45 7 7)'/%3E%3C/svg%3E");
   border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  transition: border-color 0.15s ease, transform 0.15s ease;
+  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 }
 .creator-card:hover {
   border-color: var(--gold-dim);
   transform: translateY(-2px);
+  /* accent-in-the-shadow: the lift casts gold, not black */
+  box-shadow: 0 12px 30px rgba(232, 179, 77, 0.09), 0 6px 16px rgba(0, 0, 0, 0.4);
 }
 
 .card-link {
@@ -935,4 +1056,54 @@ button {
   .topbar { padding: 20px 16px 16px; }
   .account-trigger.is-signed-in { padding: 3px; }
   .account-menu { width: calc(100vw - 32px); max-width: 264px; }
+}
+
+/* ---- Large-screen scaling -------------------------------------------
+   The component sizes above are tuned for ~1080–1440px columns. On big
+   displays the wider .shell alone would leave the type and controls
+   looking miniature, so the core UI steps up with it. */
+@media (min-width: 1600px) {
+  .brand { font-size: 23px; }
+  .brand .tagline { font-size: 12px; }
+
+  .panel { padding: 32px; }
+  .panel h2 { font-size: 17px; }
+  .field-label { font-size: 12px; }
+
+  .chip { font-size: 14.5px; padding: 8px 10px 8px 14px; }
+  .chip-input input { font-size: 16px; min-width: 200px; }
+  .suggestion-btn { font-size: 14px; padding: 8px 15px; }
+
+  .slider-label,
+  .slider-value { font-size: 13.5px; }
+  .slider-labels { font-size: 12px; }
+
+  .filter-field label,
+  .filter-toggle { font-size: 12.5px; }
+  .filter-field select { font-size: 15px; padding: 10px 12px; }
+
+  .btn-primary { font-size: 16px; padding: 14px 26px; }
+  .btn-ghost,
+  .btn-google { font-size: 15px; padding: 12px 19px; }
+  .search-hint { font-size: 13.5px; }
+  .account-trigger { font-size: 14.5px; }
+
+  .results-header h2 { font-size: 21px; }
+  .btn-refresh { font-size: 13.5px; padding: 6px 15px; }
+  .pool-note,
+  .genre-count { font-size: 12.5px; }
+  .genre-section-header h3 { font-size: 17px; }
+
+  .grid { gap: 20px; }
+  .card-body .video-title { font-size: 15px; }
+  .channel-row .channel-name { font-size: 14.5px; }
+  .channel-row .subs { font-size: 12px; }
+  .feedback-btn { font-size: 14px; padding: 12px 8px; }
+
+  .status-text { font-size: 15px; }
+}
+
+/* Very wide displays: let the results breathe as four columns. */
+@media (min-width: 1750px) {
+  .grid { grid-template-columns: repeat(4, 1fr); }
 }
