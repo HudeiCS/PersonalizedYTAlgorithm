@@ -29,6 +29,71 @@ function publicClient() {
   return google.youtube({ version: "v3", auth: process.env.GOOGLE_API_KEY });
 }
 
+const NAMED_ENTITIES = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+};
+
+/** Turns HTML entities in YouTube's text fields back into the characters
+ *  they stand for. The Data API returns titles and descriptions HTML-escaped
+ *  — a channel called "Don't Panic" comes back as "Don&#39;t Panic" — and
+ *  since we render that text as text, not HTML, the escape leaks through to
+ *  the page verbatim.
+ *
+ *  Decoding repeats until the string stops changing (capped, so a crafted
+ *  "&amp;amp;amp;…" can't spin here) because YouTube sometimes double-encodes:
+ *  "&amp;#39;" needs two passes to reach an apostrophe. Re-running it on
+ *  already-clean text is a no-op, so it's safe to apply more than once along
+ *  a path. */
+export function decodeEntities(text) {
+  if (typeof text !== "string" || !text.includes("&")) return text;
+
+  let out = text;
+  for (let pass = 0; pass < 3; pass++) {
+    const next = out.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, body) => {
+      if (body[0] === "#") {
+        const code =
+          body[1] === "x" || body[1] === "X"
+            ? parseInt(body.slice(2), 16)
+            : parseInt(body.slice(1), 10);
+        // Reject anything outside the assignable range rather than throwing.
+        return Number.isFinite(code) && code > 0 && code <= 0x10ffff
+          ? String.fromCodePoint(code)
+          : match;
+      }
+      return NAMED_ENTITIES[body.toLowerCase()] ?? match;
+    });
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+
+/** Applies decodeEntities to the human-readable fields of a raw API item,
+ *  leaving ids, stats, and thumbnails untouched. Used where we hand the
+ *  API's own object shape downstream instead of mapping it to our own. */
+function decodeSnippet(item) {
+  if (!item?.snippet) return item;
+  return {
+    ...item,
+    snippet: {
+      ...item.snippet,
+      title: decodeEntities(item.snippet.title),
+      description: decodeEntities(item.snippet.description),
+      ...(item.snippet.channelTitle
+        ? { channelTitle: decodeEntities(item.snippet.channelTitle) }
+        : {}),
+      ...(item.snippet.tags
+        ? { tags: item.snippet.tags.map((t) => decodeEntities(t)) }
+        : {}),
+    },
+  };
+}
+
 /** Picks the highest-resolution thumbnail YouTube gave us for a given
  *  snippet.thumbnails object. `search.list` only ever returns up to `high`
  *  (~480x360); `videos.list` and `channels.list` often go up to `standard`
@@ -98,8 +163,8 @@ export async function fetchSubscriptions(user) {
     channels.push(
       ...(data.items ?? []).map((item) => ({
         channelId: item.snippet.resourceId.channelId,
-        title: item.snippet.title,
-        description: item.snippet.description,
+        title: decodeEntities(item.snippet.title),
+        description: decodeEntities(item.snippet.description),
         thumbnail: item.snippet.thumbnails?.default?.url,
         subscribedAt: item.snippet.publishedAt,
       }))
@@ -124,7 +189,7 @@ export async function enrichChannels(channelIds, useAuthedClient = null) {
       part: ["snippet", "statistics", "topicDetails", "brandingSettings"],
       id: chunk,
     });
-    results.push(...(data.items ?? []));
+    results.push(...(data.items ?? []).map(decodeSnippet));
   }
   return results;
 }
@@ -176,9 +241,9 @@ export async function searchByTopic(
   const videos = (data.items ?? []).map((item) => ({
     videoId: item.id.videoId,
     channelId: item.snippet.channelId,
-    channelTitle: item.snippet.channelTitle,
-    title: item.snippet.title,
-    description: item.snippet.description,
+    channelTitle: decodeEntities(item.snippet.channelTitle),
+    title: decodeEntities(item.snippet.title),
+    description: decodeEntities(item.snippet.description),
     publishedAt: item.snippet.publishedAt,
     thumbnail: bestThumbnailUrl(item.snippet.thumbnails),
   }));
@@ -204,7 +269,7 @@ export async function fetchVideoDetails(videoIds) {
       part: ["snippet", "statistics", "contentDetails"],
       id: chunk,
     });
-    results.push(...(data.items ?? []));
+    results.push(...(data.items ?? []).map(decodeSnippet));
   }
   return results;
 }

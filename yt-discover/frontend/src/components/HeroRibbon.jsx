@@ -364,7 +364,24 @@ function dirVec(angle) {
   return new THREE.Vector2(Math.cos(angle), Math.sin(angle));
 }
 
-function buildUniforms(isMobile, ribbon) {
+/** The ribbon's four material colors, read from the CSS theme tokens so the
+ *  decoration follows light/dark instead of pinning the hero to one
+ *  background. Falls back to the config values if a token is missing. */
+function readPalette() {
+  const css = getComputedStyle(document.documentElement);
+  const token = (name, fallback) => {
+    const v = css.getPropertyValue(name).trim();
+    return /^#[0-9a-f]{6}$/i.test(v) ? v : fallback;
+  };
+  return {
+    void: token("--ribbon-void", CFG.colors.void),
+    trough: token("--ribbon-trough", CFG.colors.trough),
+    crest: token("--ribbon-crest", CFG.colors.crest),
+    specular: token("--ribbon-specular", CFG.colors.specular),
+  };
+}
+
+function buildUniforms(isMobile, ribbon, palette) {
   const w = CFG.waves;
   const perUnit = isMobile ? CFG.mobile.densityPerUnit : CFG.weave.densityPerUnit;
   const master = CFG.amplitudeMaster * ribbon.ampScale;
@@ -384,10 +401,10 @@ function buildUniforms(isMobile, ribbon) {
     uDrift: { value: CFG.driftSpeed },
     uBreatheAmt: { value: CFG.breathe.amount },
     uBreatheSpeed: { value: CFG.breathe.speed },
-    uVoid: { value: new THREE.Vector3(...hexToRgb(CFG.colors.void)) },
-    uTrough: { value: new THREE.Vector3(...hexToRgb(CFG.colors.trough)) },
-    uCrest: { value: new THREE.Vector3(...hexToRgb(CFG.colors.crest)) },
-    uSpecColor: { value: new THREE.Vector3(...hexToRgb(CFG.colors.specular)) },
+    uVoid: { value: new THREE.Vector3(...hexToRgb(palette.void)) },
+    uTrough: { value: new THREE.Vector3(...hexToRgb(palette.trough)) },
+    uCrest: { value: new THREE.Vector3(...hexToRgb(palette.crest)) },
+    uSpecColor: { value: new THREE.Vector3(...hexToRgb(palette.specular)) },
     uTroughSat: { value: CFG.troughSaturation },
     uLightDir: { value: new THREE.Vector3(...CFG.light).normalize() },
     uWeaveDensity: { value: perUnit * ribbon.size[1] },
@@ -417,7 +434,7 @@ function buildUniforms(isMobile, ribbon) {
  *  rendered frame advances one shared clock across every ribbon's material
  *  and invalidates the next frame; when `playing` flips false the chain
  *  stops, freezing the last frame at zero GPU cost. */
-function RibbonScene({ playing, isMobile }) {
+function RibbonScene({ playing, isMobile, theme }) {
   const matRefs = useRef([]);
   const timeRef = useRef(CFG.freezeTime);
   const invalidate = useThree((s) => s.invalidate);
@@ -427,10 +444,34 @@ function RibbonScene({ playing, isMobile }) {
     () => CFG.ribbons.filter((r) => !(isMobile && r.mobileHide)),
     [isMobile]
   );
+  // Deliberately NOT keyed on the theme. Rebuilding this object would hand
+  // <shaderMaterial> a brand-new `uniforms` prop, which swaps the material
+  // out from under the demand-mode loop and leaves the animation frozen on
+  // whatever frame was last drawn. The theme is applied by writing into
+  // these same uniforms below instead.
   const uniformSets = useMemo(
-    () => ribbons.map((r) => buildUniforms(isMobile, r)),
+    () => {
+      const palette = readPalette();
+      return ribbons.map((r) => buildUniforms(isMobile, r, palette));
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [ribbons, isMobile]
   );
+
+  // Recolour in place on a theme change, then kick the loop: the materials
+  // and the running clock are untouched, so the ribbon keeps moving through
+  // the switch.
+  useEffect(() => {
+    const palette = readPalette();
+    for (const m of matRefs.current) {
+      if (!m) continue;
+      m.uniforms.uVoid.value.set(...hexToRgb(palette.void));
+      m.uniforms.uTrough.value.set(...hexToRgb(palette.trough));
+      m.uniforms.uCrest.value.set(...hexToRgb(palette.crest));
+      m.uniforms.uSpecColor.value.set(...hexToRgb(palette.specular));
+    }
+    invalidate();
+  }, [theme, invalidate]);
 
   useEffect(() => {
     // Roll the view by tilting the camera's up vector, so the receding
@@ -516,6 +557,25 @@ export default function HeroRibbon() {
   const [tabVisible, setTabVisible] = useState(!document.hidden);
   const [inView, setInView] = useState(true);
   const wrapRef = useRef(null);
+  // Bumped whenever the theme changes, to re-read the ribbon's colors from
+  // the CSS tokens. Watches both the explicit choice (the data-theme
+  // attribute) and the OS setting, which is what applies without one.
+  const [themeEpoch, setThemeEpoch] = useState(0);
+
+  useEffect(() => {
+    const bump = () => setThemeEpoch((n) => n + 1);
+    const observer = new MutationObserver(bump);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    media.addEventListener("change", bump);
+    return () => {
+      observer.disconnect();
+      media.removeEventListener("change", bump);
+    };
+  }, []);
 
   useEffect(() => {
     const onVis = () => setTabVisible(!document.hidden);
@@ -542,7 +602,7 @@ export default function HeroRibbon() {
         gl={{ alpha: true, antialias: true, powerPreference: "high-performance" }}
         camera={{ position: CFG.camera.position, fov: CFG.camera.fov, near: 0.1, far: 80 }}
       >
-        <RibbonScene playing={playing} isMobile={isMobile} />
+        <RibbonScene playing={playing} isMobile={isMobile} theme={themeEpoch} />
       </Canvas>
     </div>
   );

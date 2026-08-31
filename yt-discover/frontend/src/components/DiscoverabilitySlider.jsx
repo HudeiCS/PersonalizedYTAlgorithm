@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 /** Describes the slider position in words. A range input announces only its
  *  raw number ("0.6"), which is meaningless here — aria-valuetext replaces
  *  that with what the number actually does to the results. */
@@ -11,6 +13,18 @@ function valueText(value) {
 }
 
 export default function DiscoverabilitySlider({ value, onChange }) {
+  // While the percentage is being typed into, the field holds the raw
+  // keystrokes; null means "not editing, show the slider's own value".
+  const [draft, setDraft] = useState(null);
+  const pct = Math.round(value * 100);
+  const shown = draft ?? String(pct);
+
+  function commit() {
+    const n = parseInt(shown, 10);
+    if (!Number.isNaN(n)) onChange(Math.min(100, Math.max(0, n)) / 100);
+    setDraft(null);
+  }
+
   return (
     <div className="slider-row-wrap">
       <div className="slider-row">
@@ -20,8 +34,25 @@ export default function DiscoverabilitySlider({ value, onChange }) {
           <label className="slider-label" htmlFor="discoverability">
             discoverability
           </label>
-          <span className="slider-value" aria-hidden="true">
-            {Math.round(value * 100)}%
+          {/* Typable shortcut for the slider. Styled to be indistinguishable
+              from the plain text it replaced; sized in ch so it never shifts
+              the row as the number's width changes. */}
+          <span className="slider-value">
+            <input
+              type="text"
+              inputMode="numeric"
+              value={shown}
+              aria-label="Discoverability percentage"
+              style={{ width: `${Math.max(shown.length, 1)}ch` }}
+              onChange={(e) => setDraft(e.target.value.replace(/\D/g, "").slice(0, 3))}
+              onFocus={(e) => e.target.select()}
+              onBlur={commit}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+                if (e.key === "Escape") setDraft(null);
+              }}
+            />
+            %
           </span>
         </span>
         <div className="slider-track">

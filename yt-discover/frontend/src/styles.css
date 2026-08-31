@@ -1,21 +1,55 @@
 /* ---- Design tokens -----------------------------------------------------
    Concept: a prospector's sieve. The whole app is framed as "sifting" the
    flood of YouTube uploads for the handful of creators worth your time.
-   Palette: charcoal-indigo workshop base, sifted-gold accent for anything
-   scored well, cool cyan for "topic match" signal so gold and cyan read as
-   two distinct kinds of evidence (quality vs. relevance) at a glance.
+   Palette: a neutral paper/charcoal base with a sifted-gold accent for
+   anything scored well, and a cool teal for "topic match" so the two read
+   as distinct kinds of evidence (quality vs. relevance) at a glance.
+
+   The accent is split into three tokens because one gold cannot do every
+   job in both themes: --gold is a *fill* (dark text sits on it), --gold-ink
+   is the accent used as text or an icon against the page background, and
+   --gold-line is the accent as a border. On white, the bright fill gold has
+   nowhere near enough contrast to be read as text, so light mode gives
+   --gold-ink a much deeper value while the fill stays bright.
+
+   Light is the default; dark applies on the OS preference unless the user
+   has explicitly chosen light, and on an explicit dark choice either way.
 ------------------------------------------------------------------------- */
 :root {
-  --bg: #0f1115;
-  --surface: #161922;
-  --surface-raised: #1d2130;
-  --border: #2a2f3d;
-  --text: #edeef2;
-  --text-muted: #8c92a3;
-  --gold: #e8b34d;
-  --gold-dim: #7a5f2c;
-  --cyan: #5fd4d0;
-  --danger: #e06c6c;
+  /* Warm paper rather than white — easier on the eyes than a bright page,
+     and it keeps the gold accent from looking washed out. */
+  --bg: #f3f1ea;
+  --surface: #fcfbf7;
+  --surface-raised: #e8e5db;
+  --text: #16181d;
+  --text-muted: #565b69;
+
+  /* Two border weights. --border is decoration (panel edges, dividers) and
+     is free to be quiet. --border-strong is the *boundary of a control* —
+     inputs, selects, buttons, chips — which WCAG 1.4.11 requires to hold
+     3:1 against its background, so it is noticeably darker. */
+  --border: #cfcbbf;
+  --border-strong: #7d7869;
+
+  --gold: #dda42c;
+  --gold-ink: #714d0c;
+  --gold-hover: #c88f22;
+  --gold-line: #9a7728;
+  --gold-wash: rgba(221, 164, 44, 0.16);
+  --on-gold: #191204;
+
+  --teal: #0e6360;
+  --danger: #a81f18;
+
+  --scrim: 243, 241, 234;
+  --shadow: 0 4px 16px rgba(22, 24, 29, 0.14);
+
+  /* Ribbon material, read by HeroRibbon.jsx at runtime so the decoration
+     follows the theme instead of pinning the page to one background. */
+  --ribbon-void: #f3f1ea;
+  --ribbon-trough: #b08832;
+  --ribbon-crest: #6d6c66;
+  --ribbon-specular: #3c3a34;
 
   --font-display: "Space Grotesk", sans-serif;
   --font-body: "Inter", sans-serif;
@@ -25,6 +59,68 @@
      layout spans the full viewport with this breathing room at the
      edges — nothing is boxed into a centered column. */
   --gutter: clamp(24px, 4.5vw, 84px);
+}
+
+/* The dark palette, applied in two situations: the OS asks for dark and the
+   user has not explicitly chosen light, or the user explicitly chose dark.
+   CSS has no way to share one declaration block between a media query and a
+   plain selector, so the values are written twice — keep them in sync. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1115;
+    --surface: #161922;
+    --surface-raised: #1d2130;
+    --border: #2a2f3d;
+    --border-strong: #697083;
+    --text: #edeef2;
+    --text-muted: #949aab;
+
+    --gold: #e8b34d;
+    --gold-ink: #eab951;
+    --gold-hover: #f0bf63;
+    --gold-line: #a3813c;
+    --gold-wash: rgba(232, 179, 77, 0.12);
+    --on-gold: #1a1305;
+
+    --teal: #5fd4d0;
+    --danger: #e98d8d;
+
+    --scrim: 15, 17, 21;
+    --shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+
+    --ribbon-void: #0f1115;
+    --ribbon-trough: #4f370b;
+    --ribbon-crest: #e0cda0;
+    --ribbon-specular: #f7e7bf;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #0f1115;
+  --surface: #161922;
+  --surface-raised: #1d2130;
+  --border: #2a2f3d;
+  --border-strong: #697083;
+  --text: #edeef2;
+  --text-muted: #949aab;
+
+  --gold: #e8b34d;
+  --gold-ink: #eab951;
+  --gold-hover: #f0bf63;
+  --gold-line: #a3813c;
+  --gold-wash: rgba(232, 179, 77, 0.12);
+  --on-gold: #1a1305;
+
+  --teal: #5fd4d0;
+  --danger: #e98d8d;
+
+  --scrim: 15, 17, 21;
+  --shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+
+  --ribbon-void: #0f1115;
+  --ribbon-trough: #4f370b;
+  --ribbon-crest: #e0cda0;
+  --ribbon-specular: #f7e7bf;
 }
 
 * { box-sizing: border-box; }
@@ -77,11 +173,10 @@ button {
   top: -60px;
   z-index: 100;
   background: var(--gold);
-  color: #1a1305;
+  color: var(--on-gold);
   font-weight: 600;
   font-size: 14px;
   padding: 10px 16px;
-  border-radius: 0 0 8px 8px;
   text-decoration: none;
   transition: top 0.15s ease;
 }
@@ -93,29 +188,24 @@ button {
    a keyboard user tabbing through had no idea where they were.
    :focus-visible (not :focus) means mouse users don't see rings on click. */
 :focus-visible {
-  outline: 2px solid var(--gold);
+  outline: 2px solid var(--gold-ink);
   outline-offset: 2px;
-  border-radius: 4px;
-  /* accent-in-the-shadow: the ring casts a faint gold glow */
-  box-shadow: 0 0 16px rgba(232, 179, 77, 0.25);
 }
 
 /* The genre field is a fake input: a styled container wrapping chips and a
    borderless text input. Focus has to be shown on the container, since the
    real input has no border of its own to highlight. */
 .chip-input:focus-within {
-  outline: 2px solid var(--gold);
+  outline: 2px solid var(--gold-ink);
   outline-offset: 3px;
-  border-radius: 6px;
 }
 .chip-input input:focus-visible { outline: none; }
 
 /* .creator-card has overflow:hidden, which would clip an outward ring on
    the link inside it — inset the offset so it stays fully visible. */
 .card-link:focus-visible {
-  outline: 2px solid var(--gold);
+  outline: 2px solid var(--gold-ink);
   outline-offset: -3px;
-  border-radius: 10px;
 }
 
 /* 2.3.3 Animation from Interactions — honour the OS "reduce motion"
@@ -174,7 +264,6 @@ button {
 .brand .mark {
   width: 10px;
   height: 10px;
-  border-radius: 2px;
   background: var(--gold);
   display: inline-block;
   transform: rotate(45deg);
@@ -219,21 +308,10 @@ button {
 }
 .page-ribbon canvas { display: block; width: 100%; height: 100%; }
 
-/* No-WebGL fallback: a still diagonal band of the same material language,
-   built from layered gradients on gold alphas over the void. */
+/* No-WebGL fallback: nothing. The ribbon is pure decoration, so the honest
+   fallback is a plain background rather than a gradient impression of it. */
 .page-ribbon-static {
   animation: none;
-  background:
-    linear-gradient(
-      25deg,
-      transparent 30%,
-      rgba(232, 179, 77, 0.05) 40%,
-      rgba(232, 179, 77, 0.16) 50%,
-      rgba(122, 95, 44, 0.34) 58%,
-      rgba(232, 179, 77, 0.06) 68%,
-      transparent 78%
-    ),
-    radial-gradient(55% 40% at 60% 45%, rgba(122, 95, 44, 0.22), transparent 70%);
 }
 
 .hero-viewport {
@@ -253,8 +331,8 @@ button {
   .hero-viewport::before {
     background: radial-gradient(
       ellipse 130% 46% at 45% 50%,
-      rgba(15, 17, 21, 0.94) 36%,
-      rgba(15, 17, 21, 0) 100%
+      rgba(var(--scrim), 0.94) 36%,
+      rgba(var(--scrim), 0) 100%
     );
   }
 }
@@ -285,8 +363,8 @@ button {
      taller than the box leaves a visible cut line there */
   background: radial-gradient(
     ellipse 58% 46% at 24% 50%,
-    rgba(15, 17, 21, 0.9) 26%,
-    rgba(15, 17, 21, 0) 100%
+    rgba(var(--scrim), 0.9) 26%,
+    rgba(var(--scrim), 0) 100%
   );
 }
 
@@ -303,45 +381,24 @@ button {
   /* alpha tint of --text rather than --text-muted: the paragraph's lower
      lines can drift over lit fabric, and this stays AA there where the
      muted gray would not */
-  color: rgba(237, 238, 242, 0.82);
+  color: var(--text);
   font-size: clamp(15px, 1.5vw, 17px);
   max-width: 540px;
   line-height: 1.6;
   margin: 0;
-  text-shadow: 0 1px 12px rgba(15, 17, 21, 0.6);
 }
 
 
 /* ---- Cards / surfaces ------------------------------------------------
-   The hero's material carried into the details: every raised surface
-   wears the diamond weave as a whisper-alpha texture, and its top edge
-   catches a thin specular streak — the same bright thread that runs
-   along the ribbon's folds. */
+   Flat panels: a plain surface fill and a single hairline border. No
+   texture, no tinted edge, no corner rounding — the content is what should
+   carry the page. */
 
 .panel {
   position: relative;
-  background-color: var(--surface);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14'%3E%3Crect x='4.9' y='4.9' width='4.2' height='4.2' rx='0.8' fill='%23e8b34d' fill-opacity='0.035' transform='rotate(45 7 7)'/%3E%3C/svg%3E");
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
   padding: 24px;
-  overflow: hidden;
-}
-.panel::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  pointer-events: none;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(247, 231, 191, 0.4) 22%,
-    rgba(232, 179, 77, 0.12) 55%,
-    transparent 85%
-  );
 }
 
 .panel + .panel { margin-top: 20px; }
@@ -393,12 +450,11 @@ button {
   align-items: center;
   gap: 6px;
   background: var(--surface-raised);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 13px;
   padding: 7px 8px 7px 12px;
-  border-radius: 999px;
 }
 
 .chip button {
@@ -416,7 +472,6 @@ button {
   width: 24px;
   height: 24px;
   padding: 0;
-  border-radius: 50%;
 }
 .chip button:hover { color: var(--danger); }
 
@@ -443,21 +498,20 @@ button {
 }
 .suggestion-btn {
   background: transparent;
-  border: 1px dashed var(--border);
+  border: 1px dashed var(--border-strong);
   color: var(--text-muted);
-  border-radius: 999px;
   padding: 6px 12px;
   font-size: 12.5px;
   font-family: var(--font-mono);
 }
-.suggestion-btn:hover { border-color: var(--gold-dim); color: var(--gold); }
+.suggestion-btn:hover { border-color: var(--gold-line); color: var(--gold-ink); }
 
 .suggestion-btn.surprise {
   border-style: solid;
-  border-color: var(--gold-dim);
-  color: var(--gold);
+  border-color: var(--gold-line);
+  color: var(--gold-ink);
 }
-.suggestion-btn.surprise:hover { border-color: var(--gold); background: rgba(232, 179, 77, 0.1); }
+.suggestion-btn.surprise:hover { border-color: var(--gold-ink); background: var(--gold-wash); }
 
 /* ---- Discoverability slider -------------------------------------- */
 
@@ -473,7 +527,7 @@ button {
 .slider-track input[type="range"] {
   width: 100%;
   display: block;
-  accent-color: var(--gold);
+  accent-color: var(--gold-ink);
   /* 2.5.8 Target Size — a bare range track is a thin hit area; this keeps
      the draggable region a comfortable height without changing the look. */
   min-height: 24px;
@@ -496,7 +550,18 @@ button {
 .slider-value {
   font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--gold);
+  color: var(--gold-ink);
+}
+/* The percentage is a text field, drawn to look exactly like the static
+   number it replaced — no chrome of its own. */
+.slider-value input {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  text-align: right;
 }
 .slider-labels {
   display: flex;
@@ -538,14 +603,13 @@ button {
 }
 .filter-field select {
   background: var(--surface-raised);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   color: var(--text);
   font-family: var(--font-body);
   font-size: 13.5px;
   padding: 8px 10px;
-  border-radius: 8px;
 }
-.filter-field select:hover { border-color: var(--gold-dim); }
+.filter-field select:hover { border-color: var(--gold-line); }
 
 .filter-toggle {
   display: flex;
@@ -560,7 +624,7 @@ button {
    input, so the pointer affordance belongs on the label itself. */
 .filter-toggle label { cursor: pointer; }
 .filter-toggle input[type="checkbox"] {
-  accent-color: var(--gold);
+  accent-color: var(--gold-ink);
   /* 2.5.8 Target Size — 15px was below the 24px minimum for a pointer
      target, which is a genuine problem for anyone with a motor impairment
      or on a touchscreen. */
@@ -594,17 +658,15 @@ button {
   justify-content: center;
   gap: 8px;
   background: var(--gold);
-  color: #1a1305;
-  border: none;
+  color: var(--on-gold);
+  border: 1px solid var(--gold-line);
   font-weight: 600;
   font-size: 14.5px;
   padding: 12px 22px;
-  border-radius: 8px;
-  transition: transform 0.1s ease, background 0.15s ease, box-shadow 0.15s ease;
+  transition: background 0.15s ease;
 }
 .btn-primary:hover {
-  background: #f0bf63;
-  box-shadow: 0 4px 20px rgba(232, 179, 77, 0.28);
+  background: var(--gold-hover);
 }
 .btn-primary:active { transform: scale(0.98); }
 .btn-primary:disabled { opacity: 0.5; cursor: default; }
@@ -622,15 +684,13 @@ button {
 
 .btn-ghost {
   background: transparent;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   color: var(--text);
   font-size: 13.5px;
   padding: 10px 16px;
-  border-radius: 8px;
 }
 .btn-ghost:hover {
-  border-color: var(--gold-dim);
-  box-shadow: 0 3px 14px rgba(232, 179, 77, 0.12);
+  border-color: var(--gold-line);
 }
 
 .btn-google {
@@ -638,16 +698,39 @@ button {
   align-items: center;
   gap: 10px;
   background: var(--surface-raised);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   color: var(--text);
   padding: 10px 16px;
-  border-radius: 8px;
   font-size: 13.5px;
   font-weight: 500;
 }
-.btn-google:hover { border-color: var(--cyan); }
+.btn-google:hover { border-color: var(--teal); }
 
-/* ---- Account menu (top-right of header) ---------------------------- */
+/* ---- Header actions: theme switch + account ------------------------ */
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* 2.5.8 Target Size — 24px minimum for a pointer target. */
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.theme-toggle:hover {
+  border-color: var(--gold-line);
+  color: var(--gold-ink);
+}
 
 .account {
   position: relative;
@@ -659,28 +742,27 @@ button {
   align-items: center;
   gap: 8px;
   background: var(--surface-raised);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   color: var(--text);
-  border-radius: 999px;
   padding: 6px 14px 6px 12px;
   font-size: 13px;
   font-weight: 500;
   line-height: 1;
 }
-.account-trigger:hover { border-color: var(--gold-dim); }
-.account-trigger[aria-expanded="true"] { border-color: var(--gold-dim); }
+.account-trigger:hover { border-color: var(--gold-line); }
+.account-trigger[aria-expanded="true"] { border-color: var(--gold-line); }
 
 /* Signed out: this is the primary call to action in the header, so give it
    the same gold fill as the main button rather than the muted pill look. */
 .account-trigger:not(.is-signed-in) {
   background: var(--gold);
-  border-color: var(--gold);
-  color: #1a1305;
+  border-color: var(--gold-line);
+  color: var(--on-gold);
   font-weight: 600;
   padding: 9px 18px;
 }
-.account-trigger:not(.is-signed-in):hover { background: #f0bf63; border-color: #f0bf63; }
-.account-trigger:not(.is-signed-in)[aria-expanded="true"] { background: #f0bf63; border-color: #f0bf63; }
+.account-trigger:not(.is-signed-in):hover { background: var(--gold-hover); border-color: var(--gold-hover); }
+.account-trigger:not(.is-signed-in)[aria-expanded="true"] { background: var(--gold-hover); border-color: var(--gold-hover); }
 
 /* Signed in: collapse to a bare circular avatar button. */
 .account-trigger.is-signed-in {
@@ -697,8 +779,8 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--gold-dim);
-  color: var(--gold);
+  background: var(--surface-raised);
+  color: var(--gold-ink);
   font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 500;
@@ -712,9 +794,10 @@ button {
   width: 264px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
   padding: 8px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4), 0 2px 24px rgba(232, 179, 77, 0.07);
+  /* Neutral drop shadow, not a coloured glow — a popover still needs to read
+     as floating above the page, particularly on a light background. */
+  box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -743,7 +826,6 @@ button {
   color: var(--text);
   font-size: 13.5px;
   padding: 9px 10px;
-  border-radius: 6px;
 }
 .account-menu-item:hover { background: var(--surface-raised); }
 .account-menu-item.danger { color: var(--danger); }
@@ -758,7 +840,6 @@ button {
   font-family: var(--font-mono);
   background: var(--surface-raised);
   padding: 1px 5px;
-  border-radius: 4px;
   font-size: 11px;
 }
 .account-menu .btn-google {
@@ -768,9 +849,6 @@ button {
 
 /* ---- Results grid --------------------------------------------------- */
 
-/* The mesh's one reappearance outside the hero: a single woven row of
-   diamonds as the top edge of the results area. Kept to a thin strip so
-   the ribbon stays an event, not wallpaper. */
 .results-header {
   display: flex;
   align-items: baseline;
@@ -779,9 +857,7 @@ button {
   gap: 8px 14px;
   margin: 40px 0 16px;
   padding-top: 18px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Crect x='3.4' y='3.4' width='3.2' height='3.2' rx='0.6' fill='%23e8b34d' fill-opacity='0.35' transform='rotate(45 5 5)'/%3E%3C/svg%3E");
-  background-repeat: repeat-x;
-  background-position: left top;
+  border-top: 1px solid var(--border);
 }
 .results-header-title {
   display: flex;
@@ -798,17 +874,16 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: rgba(232, 179, 77, 0.12);
-  border: 1px solid var(--gold);
-  color: var(--gold);
+  background: var(--gold-wash);
+  border: 1px solid var(--gold-line);
+  color: var(--gold-ink);
   font-family: var(--font-mono);
   font-weight: 500;
   font-size: 12px;
   padding: 5px 13px;
-  border-radius: 999px;
   line-height: 1;
 }
-.btn-refresh:hover:not(:disabled) { background: rgba(232, 179, 77, 0.22); }
+.btn-refresh:hover:not(:disabled) { background: var(--gold-wash); }
 .btn-refresh:disabled { opacity: 0.5; cursor: default; }
 /* While a "Find creators" search is running, drop the gold accent so the
    refresh button reads as temporarily inactive. */
@@ -854,8 +929,7 @@ button {
   content: "";
   width: 7px;
   height: 7px;
-  border-radius: 1.5px;
-  background: var(--gold-dim);
+  background: var(--gold-line);
   transform: rotate(45deg);
   flex-shrink: 0;
 }
@@ -897,20 +971,16 @@ button {
 
 .creator-card {
   width: 100%;
-  background-color: var(--surface);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14'%3E%3Crect x='4.9' y='4.9' width='4.2' height='4.2' rx='0.8' fill='%23e8b34d' fill-opacity='0.035' transform='rotate(45 7 7)'/%3E%3C/svg%3E");
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color 0.15s ease;
 }
+/* Hover is a border change only — no lift, no cast glow. */
 .creator-card:hover {
-  border-color: var(--gold-dim);
-  transform: translateY(-2px);
-  /* accent-in-the-shadow: the lift casts gold, not black */
-  box-shadow: 0 12px 30px rgba(232, 179, 77, 0.09), 0 6px 16px rgba(0, 0, 0, 0.4);
+  border-color: var(--gold-line);
 }
 
 .card-link {
@@ -923,7 +993,7 @@ button {
 .thumb-wrap {
   position: relative;
   aspect-ratio: 16 / 9;
-  background: #000;
+  background: var(--surface-raised);
 }
 .thumb-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
@@ -952,8 +1022,8 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--gold-dim);
-  color: var(--gold);
+  background: var(--surface-raised);
+  color: var(--gold-ink);
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 500;
@@ -965,9 +1035,8 @@ button {
   display: inline-block;
   font-family: var(--font-mono);
   font-size: 10px;
-  color: var(--gold);
-  border: 1px solid var(--gold-dim);
-  border-radius: 4px;
+  color: var(--gold-ink);
+  border: 1px solid var(--gold-line);
   padding: 1px 6px;
   width: fit-content;
 }
@@ -980,8 +1049,7 @@ button {
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--text-muted);
-  border: 1px dashed var(--border);
-  border-radius: 4px;
+  border: 1px dashed var(--border-strong);
   padding: 1px 6px;
   width: fit-content;
 }
@@ -1009,7 +1077,7 @@ button {
 .feedback-btn + .feedback-btn {
   border-left: 1px solid var(--border);
 }
-.feedback-btn.like:hover { color: var(--cyan); }
+.feedback-btn.like:hover { color: var(--teal); }
 .feedback-btn.dismiss:hover { color: var(--danger); }
 
 .feedback-done {
@@ -1019,7 +1087,7 @@ button {
   padding: 10px 8px;
   font-size: 12.5px;
   font-weight: 500;
-  color: var(--gold);
+  color: var(--gold-ink);
 }
 .feedback-done svg {
   flex-shrink: 0;

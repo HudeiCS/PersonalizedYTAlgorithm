@@ -1,10 +1,12 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { api } from "./api";
+import { loadPrefs, savePrefs } from "./prefs";
 import GenrePicker from "./components/GenrePicker.jsx";
 import DiscoverabilitySlider from "./components/DiscoverabilitySlider.jsx";
 import Filters from "./components/Filters.jsx";
 import AuthPanel from "./components/AuthPanel.jsx";
 import CreatorCard from "./components/CreatorCard.jsx";
+import ThemeToggle from "./components/ThemeToggle.jsx";
 
 // Lazy so three.js stays out of the main bundle. The hero section's height
 // is reserved in CSS, so nothing shifts while the chunk loads.
@@ -43,32 +45,89 @@ function coverageNote({
   return parts.join(" · ");
 }
 
-/** Three starter chips drawn from the user's subscribed channel names, spaced
- *  out across the list so they're not all near-duplicates. Overlong names are
- *  skipped so a chip stays chip-sized. Returns [] if there isn't enough to
- *  work with, which signals GenrePicker to use its generic list. */
+// Words that name a *format* — a kind of video that can be about something
+// else. "A on B" only reads correctly when A is one of these ("video essays
+// on video games"). When the first topic is a subject rather than a format,
+// "on" asserts a relationship that isn't there ("hiking on city life"), so
+// those get joined with "and" instead.
+const FORMAT_NOUNS = new Set([
+  "essay", "essays", "documentary", "documentaries", "doc", "docs",
+  "review", "reviews", "retrospective", "retrospectives", "critique", "critiques",
+  "tutorial", "tutorials", "guide", "guides", "explainer", "explainers",
+  "breakdown", "breakdowns", "analysis", "commentary", "criticism",
+  "podcast", "podcasts", "interview", "interviews", "discussion", "discussions",
+  "rant", "rants", "take", "takes", "deep dive", "deep dives",
+  "video", "videos", "vlog", "vlogs", "stream", "streams", "lecture", "lectures",
+  "talk", "talks", "tier list", "tier lists", "reaction", "reactions",
+  "recap", "recaps", "compilation", "compilations", "montage", "montages",
+  "edit", "edits", "highlight", "highlights", "content", "channel", "channels",
+]);
+
+/** Whether a topic names a format rather than a subject. Only the trailing
+ *  noun matters: "video essays" is a format, "video games" is a subject. */
+function isFormat(topic) {
+  const words = topic.trim().toLowerCase().split(/\s+/);
+  return (
+    FORMAT_NOUNS.has(words.slice(-2).join(" ")) ||
+    FORMAT_NOUNS.has(words[words.length - 1])
+  );
+}
+
+function joinNatural(list) {
+  if (list.length <= 1) return list[0] ?? "";
+  if (list.length === 2) return `${list[0]} and ${list[1]}`;
+  return `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`;
+}
+
+/** Merges the typed topics into one search phrase, so multiple topics come
+ *  back as a single combined result set. A format followed by subjects reads
+ *  as "video essays on video games"; anything else is joined with "and", so
+ *  two unrelated subjects stay "hiking and city life". */
+function combineTopics(topics) {
+  if (topics.length <= 1) return topics;
+  const [first, ...rest] = topics;
+  if (isFormat(first) && !rest.some(isFormat)) {
+    return [`${first} on ${joinNatural(rest)}`];
+  }
+  return [joinNatural(topics)];
+}
+
+/** Starter chips drawn from the user's subscribed channel names, spaced out
+ *  across the list so they're not all near-duplicates. Overlong names are
+ *  skipped so a chip stays chip-sized. GenrePicker shows three at a time and
+ *  draws further down this list as they're used, so it returns a pool rather
+ *  than exactly three. Returns [] if there isn't enough to work with, which
+ *  leaves GenrePicker on its generic list. */
 function topicsFromSubs(subs) {
   const titles = (subs ?? [])
     .map((s) => (s.title || "").trim().toLowerCase())
     .filter((t) => t.length >= 2 && t.length <= 28);
   const unique = [...new Set(titles)];
   if (unique.length < 3) return [];
-  const step = Math.floor(unique.length / 3);
-  return [unique[0], unique[step], unique[step * 2]];
+  const wanted = Math.min(8, unique.length);
+  const step = Math.max(1, Math.floor(unique.length / wanted));
+  const picks = [];
+  for (let i = 0; picks.length < wanted && i * step < unique.length; i++) {
+    picks.push(unique[i * step]);
+  }
+  return picks;
 }
+
+// What the last visit left behind. Read once per page load; the server's
+// stored preferences still win for a signed-in user (see refreshAuth).
+const SAVED = loadPrefs();
 
 export default function App() {
   const [user, setUser] = useState(null);
   const [checkingAuth, setCheckingAuth] = useState(true);
-  const [genres, setGenres] = useState([]);
-  const [discoverability, setDiscoverability] = useState(0.6);
-  const [filters, setFilters] = useState({
-    duration: "any",
-    age: "any",
-    useSubscriptions: true,
-    includeShorts: true,
-  });
+  const [genres, setGenres] = useState(SAVED.genres);
+  const [discoverability, setDiscoverability] = useState(SAVED.discoverability);
+  const [filters, setFilters] = useState(SAVED.filters);
   const [results, setResults] = useState(null);
+  // The topics/slider/filters behind the results on screen. Refresh replays
+  // this rather than reading the form, so clearing the chips doesn't take the
+  // refresh button down with them.
+  const [lastQuery, setLastQuery] = useState(null);
   const [loading, setLoading] = useState(false);
   // Which control kicked off the current search: "find" or "refresh". Drives
   // where the spinner shows and which of the two buttons greys out.
@@ -85,6 +144,12 @@ export default function App() {
   // (empty when signed out, which makes GenrePicker fall back to its generic
   // list). Fetched once per session; a failure just leaves it generic.
   const [suggestedTopics, setSuggestedTopics] = useState([]);
+
+  // Mirror the form back to storage on every change, so the next visit opens
+  // with the same topics, slider position, and filters.
+  useEffect(() => {
+    savePrefs({ genres, discoverability, filters });
+  }, [genres, discoverability, filters]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -118,13 +183,33 @@ export default function App() {
   }
 
   async function handleFind(source = "find") {
-    if (genres.length === 0) return;
+    // "find" runs whatever is in the form. "refresh" re-runs the search that
+    // produced the results currently on screen, so it keeps working after the
+    // topic chips have been cleared — the results are what it refreshes, not
+    // the form.
+    const query = source === "refresh" ? lastQuery : { genres, discoverability, filters };
+    if (!query || query.genres.length === 0) return;
+
     setLoading(true);
     setLoadingSource(source);
     setError(null);
     try {
-      if (user) api.savePreferences(genres, discoverability).catch(() => {});
-      const data = await api.recommendations(genres, discoverability, filters);
+      // Only a form search updates the saved preferences; a refresh replays a
+      // past query and has no business rewriting what you have selected now.
+      if (user && source === "find") {
+        api.savePreferences(query.genres, query.discoverability).catch(() => {});
+      }
+      // Multiple topics are merged into a single query so the results come
+      // back as one combined section (~10) rather than a separate block of
+      // 10 per topic. The chips the user typed are kept as-is.
+      const data = await api.recommendations(
+        combineTopics(query.genres),
+        query.discoverability,
+        query.filters
+      );
+      // Only after it succeeded, so a failed search leaves the previous
+      // query refreshable.
+      setLastQuery(query);
       setResults(data.results);
       setPoolMeta({
         usedSubscriptions: data.usedSubscriptions,
@@ -142,21 +227,22 @@ export default function App() {
   }
 
   async function handleFeedback(videoId, channelId, features, label, videoTitle) {
-    // Optimistic update: mark it given right away so the buttons disable
-    // instantly, then roll back only if the request actually fails.
+    // The confirmation lands on the first click and stays. Feedback is a
+    // best-effort training signal, so a failed POST is retried quietly in
+    // the background rather than yanking the "thanks" away and making the
+    // user click again (which used to happen whenever the dev backend was
+    // mid-restart).
     setFeedbackGiven((prev) => ({ ...prev, [videoId]: label === 1 ? "liked" : "dismissed" }));
     setFeedbackAnnouncement(
       label === 1 ? `Liked ${videoTitle}.` : `Dismissed ${videoTitle}. You won't be shown this again.`
     );
-    try {
-      await api.feedback(videoId, channelId, features, label);
-    } catch (err) {
-      setFeedbackGiven((prev) => {
-        const next = { ...prev };
-        delete next[videoId];
-        return next;
-      });
-      setFeedbackAnnouncement(`Couldn't save your feedback on ${videoTitle}. Please try again.`);
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        await api.feedback(videoId, channelId, features, label);
+        return;
+      } catch {
+        await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+      }
     }
   }
 
@@ -183,7 +269,10 @@ export default function App() {
           Sift
           <span className="tagline">creator discoverability engine</span>
         </div>
-        {!checkingAuth && <AuthPanel user={user} onLoggedOut={() => { setUser(null); }} />}
+        <div className="topbar-actions">
+          <ThemeToggle />
+          {!checkingAuth && <AuthPanel user={user} onLoggedOut={() => { setUser(null); }} />}
+        </div>
       </header>
 
       <main id="main-content">
@@ -238,7 +327,9 @@ export default function App() {
             <span id="find-hint" className="search-hint">
               {genres.length === 0
                 ? "Add at least one topic above to search."
-                : `Searching ${genres.length} topic${genres.length === 1 ? "" : "s"}.`}
+                : genres.length === 1
+                  ? "Searching 1 topic."
+                  : `Combining ${genres.length} topics into one search: “${combineTopics(genres)[0]}”.`}
             </span>
           </div>
         </section>
@@ -261,7 +352,7 @@ export default function App() {
                     type="button"
                     className={`btn-refresh${loading && loadingSource !== "refresh" ? " is-muted" : ""}`}
                     onClick={() => handleFind("refresh")}
-                    disabled={loading || genres.length === 0}
+                    disabled={loading || !lastQuery}
                     aria-busy={loadingSource === "refresh"}
                     aria-label="Refresh results — run the search again for a new set of creators"
                   >

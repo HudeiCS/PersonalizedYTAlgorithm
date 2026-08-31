@@ -1,10 +1,10 @@
 import { useState } from "react";
 
 // Generic starter chips for signed-out visitors. When signed in, App passes
-// `suggestedTopics` derived from the user's own subscriptions and those take
-// the three starter slots instead. "Surprise me" always draws from this
-// generic list (minus what's already added and its own last pick), so
-// repeated presses keep turning up something different.
+// `suggestedTopics` derived from the user's own subscriptions; those go to
+// the front of the queue and this list backfills behind them. "Surprise me"
+// draws from the same queue, so repeated presses keep turning up something
+// different.
 const SUGGESTIONS = [
   "minecraft edits",
   "valorant highlights",
@@ -31,20 +31,33 @@ export default function GenrePicker({ genres, onChange, suggestedTopics = [] }) 
   // Chips appearing and disappearing is a purely visual event otherwise —
   // this is what makes add/remove perceivable without sight.
   const [announcement, setAnnouncement] = useState("");
-  // Remembered so "Surprise me" never hands back the same topic twice in a row.
-  const [lastSurprise, setLastSurprise] = useState(null);
+  // Suggestions the user has already been offered and taken. Once spent, a
+  // suggestion is gone for the session: removing its chip frees a slot for a
+  // *new* suggestion instead of handing the same one back.
+  const [spent, setSpent] = useState(() => new Set());
+
+  // Subscription-derived topics first, generic ones behind them as backfill,
+  // so the queue never runs dry once the personalised few are spent.
+  const queue = [...new Set([...suggestedTopics, ...SUGGESTIONS])];
+  const available = queue.filter((s) => !spent.has(s) && !genres.includes(s));
+  const starters = available.slice(0, STARTER_COUNT);
+
+  function takeSuggestion(value) {
+    setSpent((prev) => new Set(prev).add(value));
+    addGenre(value);
+  }
 
   function surpriseMe() {
-    const pool = SUGGESTIONS.filter(
-      (s) => !genres.includes(s) && s !== lastSurprise
-    );
+    // Prefer something not yet offered; if the whole queue is spent, fall
+    // back to anything not currently selected rather than dead-ending.
+    const pool = available.length
+      ? available
+      : queue.filter((s) => !genres.includes(s));
     if (pool.length === 0) {
       setAnnouncement("No more suggestions to try.");
       return;
     }
-    const pick = pool[Math.floor(Math.random() * pool.length)];
-    setLastSurprise(pick);
-    addGenre(pick);
+    takeSuggestion(pool[Math.floor(Math.random() * pool.length)]);
   }
 
   function addGenre(value) {
@@ -63,11 +76,6 @@ export default function GenrePicker({ genres, onChange, suggestedTopics = [] }) 
     onChange(genres.filter((g) => g !== value));
     setAnnouncement(`Removed topic ${value}. ${genres.length - 1} remaining.`);
   }
-
-  const starterPool = suggestedTopics.length ? suggestedTopics : SUGGESTIONS;
-  const starters = starterPool
-    .filter((s) => !genres.includes(s))
-    .slice(0, STARTER_COUNT);
 
   function handleKeyDown(e) {
     if (e.key === "Enter" || e.key === ",") {
@@ -126,7 +134,7 @@ export default function GenrePicker({ genres, onChange, suggestedTopics = [] }) 
             type="button"
             className="suggestion-btn"
             aria-label={`Add suggested topic ${s}`}
-            onClick={() => addGenre(s)}
+            onClick={() => takeSuggestion(s)}
           >
             <span aria-hidden="true">+ </span>{s}
           </button>
