@@ -1,4 +1,5 @@
 # Sift
+<img width="1648" height="659" alt="sift" src="https://github.com/user-attachments/assets/933a9318-7e01-4a20-9e35-a241a67e5027" />
 
 **A YouTube discovery engine that recommends creators, not videos.**
 
