@@ -250,6 +250,49 @@ export async function fetchChannelUploads(uploadsPlaylistId, maxResults = 12) {
   }
 }
 
+/** The channels a creator has chosen to feature on their own page. This is a
+ *  curated endorsement rather than a passing credit, and it covers the
+ *  creators the @mention scrape misses entirely: established channels tend to
+ *  keep tidy descriptions with no handles in them, but do maintain a featured
+ *  list. 1 quota unit. Returns [] when the channel has no such section. */
+export async function fetchFeaturedChannels(channelId) {
+  const yt = publicClient();
+  try {
+    const { data } = await yt.channelSections.list({
+      part: ["contentDetails"],
+      channelId,
+    });
+    const ids = [];
+    for (const section of data.items ?? []) {
+      for (const id of section.contentDetails?.channels ?? []) ids.push(id);
+    }
+    return [...new Set(ids)];
+  } catch {
+    return [];
+  }
+}
+
+/** Channels by id, in the same shape resolveChannelByHandle returns, so the
+ *  graph can treat a featured-channel id and a scraped @handle alike. */
+export async function resolveChannelsByIds(channelIds) {
+  if (channelIds.length === 0) return [];
+  const yt = publicClient();
+  try {
+    const { data } = await yt.channels.list({
+      part: ["snippet", "contentDetails", "statistics"],
+      id: channelIds.slice(0, 50),
+    });
+    return (data.items ?? []).map((item) => ({
+      channelId: item.id,
+      title: decodeEntities(item.snippet?.title),
+      uploadsPlaylistId: item.contentDetails?.relatedPlaylists?.uploads ?? null,
+      subscriberCount: item.statistics?.subscriberCount ?? null,
+    }));
+  } catch {
+    return [];
+  }
+}
+
 /** Genre/topic-driven channel discovery. Searches videos matching the
  *  query, then rolls the results up to their parent channels — this is how
  *  we go from "Minecraft edit videos" to a list of candidate creators.

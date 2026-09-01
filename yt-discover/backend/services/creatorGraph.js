@@ -27,7 +27,15 @@
  * is the only reason walking dozens of channels is affordable.
  */
 
-import { resolveChannelByHandle, fetchChannelUploads } from "./youtubeService.js";
+import {
+  resolveChannelByHandle,
+  resolveChannelsByIds,
+  fetchChannelUploads,
+  fetchVideoDetails,
+  fetchFeaturedChannels,
+  enrichChannels,
+  searchByTopic,
+} from "./youtubeService.js";
 
 // Master switch. false => seeds are treated as ordinary text topics again,
 // which is exactly the behaviour before this file existed.
@@ -52,6 +60,10 @@ const LIMITS = {
   seedOwnVideos: 4,
   perRelatedVideos: 6,
   perDistantVideos: 4,
+  // below this many creators from the graph, top up with a genre search
+  minCreators: 6,
+  // results pulled by that genre search
+  fallbackResults: 25,
 };
 
 /** Whether a typed topic is naming a creator rather than describing a
@@ -108,15 +120,18 @@ export async function videosFromCreatorGraph(seedHandle, limits = {}) {
   const creditedBy = new Map();
 
   let frontier = [
-    { text: seedUploads.map((v) => `${v.title} ${v.description}`).join("\n"), from: seed.channelId },
+    {
+      text: seedUploads.map((v) => `${v.title} ${v.description}`).join("\n"),
+      channelId: seed.channelId,
+    },
   ];
 
   for (let hop = 1; hop <= cfg.depth && found.length < cfg.maxCreators; hop++) {
     const handleCounts = new Map();
-    for (const { text, from } of frontier) {
+    for (const { text, channelId } of frontier) {
       for (const h of extractHandles(text, visitedHandles).keys()) {
         if (!creditedBy.has(h)) creditedBy.set(h, new Set());
-        creditedBy.get(h).add(from);
+        creditedBy.get(h).add(channelId);
         handleCounts.set(h, creditedBy.get(h).size);
       }
     }
@@ -126,11 +141,27 @@ export async function videosFromCreatorGraph(seedHandle, limits = {}) {
       .map(([h]) => h)
       .filter((h) => !visitedHandles.has(h))
       .slice(0, Math.min(cfg.maxPerHop, cfg.maxCreators - found.length));
-    if (next.length === 0) break;
     next.forEach((h) => visitedHandles.add(h));
 
-    const resolved = (await Promise.all(next.map((h) => resolveChannelByHandle(h))))
-      .filter((c) => c?.uploadsPlaylistId && !visitedIds.has(c.channelId));
+    // Second edge source: the channels each frontier creator features on
+    // their own page. Description credits and featured lists barely overlap —
+    // small creators credit collaborators in descriptions and feature nobody,
+    // established ones keep clean descriptions but curate a featured list. A
+    // seed with neither used to fall through to showing only its own videos.
+    const featuredIds = [...new Set(
+      (await Promise.all(frontier.map((f) => fetchFeaturedChannels(f.channelId)))).flat()
+    )].filter((id) => !visitedIds.has(id));
+
+    if (next.length === 0 && featuredIds.length === 0) break;
+
+    const byHandle = (await Promise.all(next.map((h) => resolveChannelByHandle(h)))).filter(Boolean);
+    const byId = await resolveChannelsByIds(
+      featuredIds.slice(0, Math.max(0, cfg.maxPerHop - byHandle.length))
+    );
+
+    const resolved = [...byHandle, ...byId].filter(
+      (c) => c?.uploadsPlaylistId && !visitedIds.has(c.channelId)
+    );
     resolved.forEach((c) => visitedIds.add(c.channelId));
 
     // Read each new channel's uploads once: they are both this hop's
@@ -144,16 +175,149 @@ export async function videosFromCreatorGraph(seedHandle, limits = {}) {
     resolved.forEach((c, i) => found.push({ channel: c, hop, uploads: uploads[i] }));
     frontier = resolved.map((c, i) => ({
       text: uploads[i].map((v) => `${v.title} ${v.description}`).join("\n"),
-      from: c.channelId,
+      channelId: c.channelId,
     }));
   }
 
+  // Second strategy: what the creator makes, rather than who they know.
+  // Plenty of creators credit nobody and feature nobody, and the walk finds
+  // little or nothing for them. Rather than hand back a page of the seed's
+  // own videos, work out the genre from the seed's own uploads and search for
+  // it. This runs whenever the graph came back thin, not only when it came
+  // back empty, so a sparse seed gets topped up instead of under-filling.
+  let genreVideos = [];
+  let genreQuery = null;
+  if (found.length < cfg.minCreators) {
+    genreQuery = await genreQueryForChannel(seed, seedUploads);
+    if (genreQuery) {
+      const { videos } = await searchByTopic(genreQuery, { maxResults: cfg.fallbackResults });
+      genreVideos = videos.filter(
+        (v) => v.channelId !== seed.channelId && !visitedIds.has(v.channelId)
+      );
+    }
+  }
+
   const videos = [
-    ...seedUploads.slice(0, cfg.seedOwnVideos),
+    // Only lead with the seed's own work when there is other work to sit
+    // beside it; when the genre search is carrying the page, the seed is not
+    // the answer.
+    ...(found.length ? seedUploads.slice(0, cfg.seedOwnVideos) : seedUploads.slice(0, 1)),
     ...found.flatMap(({ hop, uploads }) =>
       uploads.slice(0, hop === 1 ? cfg.perRelatedVideos : cfg.perDistantVideos)
     ),
+    ...genreVideos,
   ];
 
-  return { videos, seed, related: found.map((f) => ({ ...f.channel, hop: f.hop })) };
+  return {
+    videos,
+    seed,
+    related: found.map((f) => ({ ...f.channel, hop: f.hop })),
+    genreQuery,
+    usedGenreSearch: genreVideos.length > 0,
+  };
+}
+
+/** Strips accents and punctuation so "Bon Appétit" and "bon appetit" compare
+ *  equal. */
+function normalizeWord(word) {
+  return word
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+const TITLE_STOPWORDS = new Set([
+  "the","and","for","with","from","this","that","you","your","our","are","was",
+  "但是","что","new","out","get","how","its","one","can","all","but","not","has",
+  "video","videos","full","part","official","feat","ft","prod","edit","edits",
+  "clips","clip","best","top","vol","ep","live","short","shorts","subscribe",
+]);
+
+/**
+ * A search query describing what a creator actually makes, assembled from
+ * whichever signals that particular channel happens to carry. Channels differ
+ * enormously in what they fill in, so this walks a priority order rather than
+ * trusting any single field:
+ *
+ *   1. channel keywords, single words only
+ *   2. video tags, most frequent first
+ *   3. words from video titles, most frequent first
+ *   4. YouTube's topic categories
+ *
+ * Measured on real seeds: @dishy has NO channel keywords at all but 193 video
+ * tags led by "valorant edit" and "valorant montage", so tags carry it, while
+ * keywords alone would have produced the useless "Action game Video game
+ * culture". @hudsunVFX has neither keywords nor tags and is carried by title
+ * words. Topic categories are last because they are the same three generic
+ * buckets for every gaming channel.
+ *
+ * Terms echoing the channel's own name or handle are dropped throughout: they
+ * turn the search back toward the seed, which is the one creator the user
+ * already has.
+ */
+async function genreQueryForChannel(seed, seedUploads) {
+  const [channel] = await enrichChannels([seed.channelId]);
+
+  const selfWords = new Set(
+    `${channel?.snippet?.title ?? ""} ${seed.title ?? ""}`
+      .split(/\s+/)
+      .map(normalizeWord)
+      .filter((w) => w.length > 2)
+  );
+  const isSelfReferential = (term) =>
+    term.split(/\s+/).some((w) => selfWords.has(normalizeWord(w)));
+
+  // 1. keywords the creator set. Single words describe the subject;
+  // multi-word ones are nearly always show or presenter names, which are as
+  // self-referential as the channel name (Bon Appétit: keeping them returned
+  // 2 other channels, dropping them returned 23).
+  const keywords = ((channel?.brandingSettings?.channel?.keywords ?? "")
+    .match(/"[^"]*"|\S+/g) ?? [])
+    .map((k) => k.replace(/"/g, "").trim())
+    .filter((k) => k && !/\s/.test(k) && !isSelfReferential(k));
+
+  // 2. video tags, which multi-word or not are genuinely topical
+  let tags = [];
+  const videoIds = seedUploads.map((v) => v.videoId).filter(Boolean);
+  if (videoIds.length) {
+    const details = await fetchVideoDetails(videoIds);
+    const counts = new Map();
+    for (const d of details) {
+      for (const tag of d.snippet?.tags ?? []) {
+        const clean = tag.trim().toLowerCase();
+        if (clean && !isSelfReferential(clean)) counts.set(clean, (counts.get(clean) ?? 0) + 1);
+      }
+    }
+    tags = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
+  }
+
+  // 3. recurring words in the titles themselves
+  const titleCounts = new Map();
+  for (const v of seedUploads) {
+    for (const raw of (v.title ?? "").toLowerCase().match(/[a-z][a-z0-9]{2,}/g) ?? []) {
+      if (TITLE_STOPWORDS.has(raw) || selfWords.has(raw)) continue;
+      titleCounts.set(raw, (titleCounts.get(raw) ?? 0) + 1);
+    }
+  }
+  const titleWords = [...titleCounts.entries()]
+    .filter(([, n]) => n >= 2)
+    .sort((a, b) => b[1] - a[1])
+    .map(([w]) => w);
+
+  // 4. YouTube's own buckets, generic enough to be a last resort only
+  const topics = (channel?.topicDetails?.topicCategories ?? []).map((url) =>
+    decodeURIComponent(url.split("/").pop() ?? "").replace(/[_-]+/g, " ")
+  );
+
+  const terms = [];
+  for (const source of [keywords, tags, titleWords, topics]) {
+    for (const term of source) {
+      if (terms.length >= 4) break;
+      if (!terms.some((t) => t.includes(term) || term.includes(t))) terms.push(term);
+    }
+    if (terms.length >= 3) break;
+  }
+
+  return terms.length ? terms.join(" ") : null;
 }
