@@ -1,10 +1,11 @@
 import { useState } from "react";
 
-// Generic starter chips for signed-out visitors. When signed in, App passes
-// `suggestedTopics` derived from the user's own subscriptions; those go to
-// the front of the queue and this list backfills behind them. "Surprise me"
-// draws from the same queue, so repeated presses keep turning up something
-// different.
+// Generic topics, unrelated to anyone's account. Two separate jobs:
+//   - starter chips: when signed in, App's `suggestedTopics` (drawn from the
+//     user's subscriptions) go first and this list backfills behind them.
+//   - "surprise me": draws from this list *only*. The point of the button is
+//     to throw out something from outside your usual orbit, so pulling from
+//     your own subscriptions would defeat it.
 const SUGGESTIONS = [
   "minecraft edits",
   "valorant highlights",
@@ -36,11 +37,18 @@ export default function GenrePicker({ genres, onChange, suggestedTopics = [] }) 
   // *new* suggestion instead of handing the same one back.
   const [spent, setSpent] = useState(() => new Set());
 
-  // Subscription-derived topics first, generic ones behind them as backfill,
-  // so the queue never runs dry once the personalised few are spent.
+  // Starter chips: subscription-derived topics first, generic ones behind
+  // them as backfill, so the queue never runs dry once the personalised few
+  // are spent.
   const queue = [...new Set([...suggestedTopics, ...SUGGESTIONS])];
   const available = queue.filter((s) => !spent.has(s) && !genres.includes(s));
   const starters = available.slice(0, STARTER_COUNT);
+
+  // "Surprise me" ignores the subscription topics entirely and only ever
+  // offers a generic one.
+  const surprisePool = SUGGESTIONS.filter(
+    (s) => !spent.has(s) && !genres.includes(s)
+  );
 
   function takeSuggestion(value) {
     setSpent((prev) => new Set(prev).add(value));
@@ -48,11 +56,12 @@ export default function GenrePicker({ genres, onChange, suggestedTopics = [] }) 
   }
 
   function surpriseMe() {
-    // Prefer something not yet offered; if the whole queue is spent, fall
-    // back to anything not currently selected rather than dead-ending.
-    const pool = available.length
-      ? available
-      : queue.filter((s) => !genres.includes(s));
+    // Prefer something not yet offered; once the generic list is used up,
+    // fall back to any generic topic not currently selected rather than
+    // dead-ending — still never a subscription topic.
+    const pool = surprisePool.length
+      ? surprisePool
+      : SUGGESTIONS.filter((s) => !genres.includes(s));
     if (pool.length === 0) {
       setAnnouncement("No more suggestions to try.");
       return;
