@@ -440,6 +440,85 @@ button {
   margin-bottom: 8px;
 }
 
+/* ---- "How to search" popover ---------------------------------------- */
+
+/* The row takes over the label's bottom margin so the "i" sits on the label's
+   own line, centred against it, rather than being nudged by a margin of its
+   own. */
+.field-label-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+}
+.field-label-row .field-label { margin-bottom: 0; }
+
+.search-help {
+  position: relative;
+  display: inline-flex;
+}
+.search-help-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
+.search-help-trigger:hover,
+.search-help-trigger[aria-expanded="true"] {
+  border-color: var(--gold-line);
+  color: var(--gold-ink);
+}
+
+.search-help-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 25;
+  width: min(380px, calc(100vw - 48px));
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  padding: 14px 16px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  text-transform: none;
+  letter-spacing: normal;
+}
+.search-help-panel dl { margin: 0; }
+.search-help-panel dt {
+  color: var(--text);
+  font-weight: 600;
+  margin-top: 10px;
+}
+.search-help-panel dt:first-child { margin-top: 0; }
+.search-help-panel dd { margin: 2px 0 0; }
+.search-help-panel code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  background: var(--surface-raised);
+  color: var(--gold-ink);
+  padding: 1px 4px;
+}
+.search-help-foot {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 640px) {
+  .search-help-panel { width: calc(100vw - 48px); }
+}
+
 /* ---- Genre chips input ------------------------------------------------ */
 
 .chip-input {

@@ -194,6 +194,62 @@ export async function enrichChannels(channelIds, useAuthedClient = null) {
   return results;
 }
 
+/** Resolves an @handle to a channel. `forHandle` is a single-handle lookup,
+ *  but at 1 quota unit a call it is cheap enough to run over a list — a
+ *  search.list would cost 100 for the same answer. contentDetails carries
+ *  the uploads playlist id, which is the cheap way to read a channel's
+ *  videos afterwards. Returns null for a handle that doesn't resolve. */
+export async function resolveChannelByHandle(handle) {
+  const yt = publicClient();
+  const clean = String(handle).trim().replace(/^@/, "");
+  if (!clean) return null;
+  try {
+    const { data } = await yt.channels.list({
+      part: ["snippet", "contentDetails", "statistics"],
+      forHandle: clean,
+    });
+    const item = data.items?.[0];
+    if (!item) return null;
+    return {
+      channelId: item.id,
+      title: decodeEntities(item.snippet?.title),
+      uploadsPlaylistId: item.contentDetails?.relatedPlaylists?.uploads ?? null,
+      subscriberCount: item.statistics?.subscriberCount ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** A channel's recent uploads, in the same shape searchByTopic returns so
+ *  callers downstream can't tell the difference. Reads the uploads playlist
+ *  rather than issuing search.list?channelId — 1 quota unit instead of 100,
+ *  which is what makes walking a graph of dozens of channels affordable. */
+export async function fetchChannelUploads(uploadsPlaylistId, maxResults = 12) {
+  if (!uploadsPlaylistId) return [];
+  const yt = publicClient();
+  try {
+    const { data } = await yt.playlistItems.list({
+      part: ["snippet", "contentDetails"],
+      playlistId: uploadsPlaylistId,
+      maxResults,
+    });
+    return (data.items ?? [])
+      .filter((item) => item.snippet?.resourceId?.videoId)
+      .map((item) => ({
+        videoId: item.snippet.resourceId.videoId,
+        channelId: item.snippet.videoOwnerChannelId ?? item.snippet.channelId,
+        channelTitle: decodeEntities(item.snippet.videoOwnerChannelTitle ?? item.snippet.channelTitle),
+        title: decodeEntities(item.snippet.title),
+        description: decodeEntities(item.snippet.description),
+        publishedAt: item.contentDetails?.videoPublishedAt ?? item.snippet.publishedAt,
+        thumbnail: bestThumbnailUrl(item.snippet.thumbnails),
+      }));
+  } catch {
+    return [];
+  }
+}
+
 /** Genre/topic-driven channel discovery. Searches videos matching the
  *  query, then rolls the results up to their parent channels — this is how
  *  we go from "Minecraft edit videos" to a list of candidate creators.

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 // Generic topics, unrelated to anyone's account. Two separate jobs:
 //   - starter chips: when signed in, App's `suggestedTopics` (drawn from the
@@ -100,9 +100,12 @@ export default function GenrePicker({ genres, onChange, suggestedTopics = [] }) 
       {/* The field had no label at all before — only a placeholder, which
           disappears on typing and is not a substitute for a label
           (WCAG 3.3.2). */}
-      <label className="field-label" htmlFor="genre-input">
-        Topics, genres or creators to search for
-      </label>
+      <div className="field-label-row">
+        <label className="field-label" htmlFor="genre-input">
+          Topics, genres or creators to search for
+        </label>
+        <SearchHelp />
+      </div>
 
       <div className="chip-input">
         {genres.length > 0 && (
@@ -124,7 +127,7 @@ export default function GenrePicker({ genres, onChange, suggestedTopics = [] }) 
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={handleKeyDown}
           onBlur={() => addGenre(draft)}
-          placeholder={genres.length ? "add another..." : "e.g. minecraft edits, cozy cooking..."}
+          placeholder={genres.length ? "add another..." : "e.g. cozy cooking, or @creator for more like them"}
         />
       </div>
 
@@ -152,5 +155,80 @@ export default function GenrePicker({ genres, onChange, suggestedTopics = [] }) 
 
       <div className="sr-only" role="status" aria-live="polite">{announcement}</div>
     </div>
+  );
+}
+
+/** The field accepts three different kinds of input and combines them in a
+ *  way that isn't guessable from a placeholder, so the rules live behind an
+ *  "i" rather than in permanent text that would crowd the form. */
+function SearchHelp() {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    }
+    function onKey(e) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <span className="search-help" ref={wrapRef}>
+      <button
+        type="button"
+        className="search-help-trigger"
+        aria-expanded={open}
+        aria-label="How to use the search field"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span aria-hidden="true">i</span>
+      </button>
+
+      {open && (
+        <div className="search-help-panel" role="dialog" aria-label="How to use the search field">
+          <dl>
+            <dt>Search a topic</dt>
+            <dd>
+              Type something like <code>cozy cooking</code>. Press Enter or
+              click away to add it.
+            </dd>
+
+            <dt>Find creators like one you know</dt>
+            <dd>
+              Type their YouTube handle, starting with <code>@</code>. Sift
+              finds other creators like them, including small ones a normal
+              search will not turn up.
+            </dd>
+
+            <dt>Add more than one topic</dt>
+            <dd>
+              Your topics get joined into a single search.{" "}
+              <code>video essays</code> plus <code>video games</code> becomes
+              &ldquo;video essays on video games&rdquo;. You get one set of
+              results instead of a separate block for each topic.
+            </dd>
+
+            <dt>Use both at once</dt>
+            <dd>
+              <code>@creator</code> plus <code>film photography</code> runs the
+              creator lookup and the topic search separately. Each one gets its
+              own set of results.
+            </dd>
+          </dl>
+          <p className="search-help-foot">
+            Press Backspace in an empty box to remove the last topic.
+          </p>
+        </div>
+      )}
+    </span>
   );
 }

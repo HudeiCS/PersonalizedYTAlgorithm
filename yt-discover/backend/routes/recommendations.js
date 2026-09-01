@@ -2,6 +2,11 @@ import { Router } from "express";
 import { getUser, setPreferences } from "../db/store.js";
 import { recordFeedback } from "../db/feedback.js";
 import {
+  USE_CREATOR_GRAPH,
+  isCreatorSeed,
+  videosFromCreatorGraph,
+} from "../services/creatorGraph.js";
+import {
   fetchSubscriptions,
   enrichChannels,
   searchByTopic,
@@ -339,6 +344,16 @@ router.post("/recommendations", async (req, res) => {
     // channel hasn't moved us closer to a full page and shouldn't count.
     const videoBatches = await Promise.all(
       seedQueries.map(async (q) => {
+        // A topic written as "@handle" names a creator, not a subject. Those
+        // are gathered by walking that creator's collaboration graph instead
+        // of searching text — see services/creatorGraph.js for why some
+        // niches are unreachable by any query. Everything after this returns
+        // the same video shape, so the rest of the pipeline is unchanged.
+        if (USE_CREATOR_GRAPH && isCreatorSeed(q)) {
+          const { videos } = await videosFromCreatorGraph(q);
+          return videos;
+        }
+
         const [firstPage, dated] = await Promise.all([
           searchByTopic(q, searchOptions),
           // The small-creator source. One page only — its whole value is

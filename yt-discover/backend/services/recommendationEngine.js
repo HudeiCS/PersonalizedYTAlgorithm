@@ -55,6 +55,51 @@ export function hasLearnedWeights() {
   return loadLearnedWeights() !== null;
 }
 
+/* ---- Topic signals beyond the video's own words ------------------------
+   A bag-of-words match against a video's title/description/tags only finds
+   videos that literally say the thing. A Valorant edit called "INSANE 1v5
+   CLUTCH" shares no term with "valorant edits", scores ~0, and gets cut —
+   even though YouTube's own search correctly surfaced it.
+
+   Two independent widenings, each switchable on its own. Setting either to
+   false restores the previous behaviour exactly, with no other edits.  */
+
+// (1) Score against what the CHANNEL is about, not just what the video says.
+// topicDetails.topicCategories and brandingSettings.keywords were already
+// being fetched by enrichChannels() and thrown away. Helps most where a
+// channel contributed only one video to the pool.
+const USE_CHANNEL_TOPIC_SIGNALS = true;
+
+// (2) Let a channel's best-matching video lift its siblings. If a channel
+// put three videos in the pool and one clearly matches, the channel is
+// on-topic and its blank-titled clips should not be judged in isolation.
+// Helps only where a channel contributed several videos.
+const USE_CHANNEL_TOPIC_PROPAGATION = true;
+
+// How much of a channel's best topicMatch its other videos may inherit.
+// 0 = no propagation; 1 = every video inherits the channel's best outright.
+// Deliberately below 1 so a genuinely on-topic video still outranks a
+// sibling that is merely on a matching channel.
+const CHANNEL_TOPIC_INHERITANCE = 0.6;
+
+/** Wikipedia topic URLs YouTube attaches to a channel, as plain words:
+ *  ".../wiki/First-person_shooter" -> "First person shooter". This describes
+ *  what a channel *is*, independent of how any single video is titled. */
+function topicCategoryTerms(cDetails) {
+  return (cDetails?.topicDetails?.topicCategories ?? []).map((url) => {
+    const slug = url.split("/").pop() ?? "";
+    return decodeURIComponent(slug).replace(/[_-]+/g, " ");
+  });
+}
+
+/** The keyword list a creator sets on their own channel. YouTube returns it
+ *  as a single space-separated string in which multi-word phrases are
+ *  quoted, so it needs splitting on whitespace *outside* quotes. */
+function channelKeywordTerms(cDetails) {
+  const raw = cDetails?.brandingSettings?.channel?.keywords ?? "";
+  return (raw.match(/"[^"]*"|\S+/g) ?? []).map((k) => k.replace(/"/g, ""));
+}
+
 // A candidate needs topicMatch at least this fraction of the BEST topicMatch
 // in the current search's own pool before the discoverability boost applies
 // at full strength; below that it ramps down smoothly.
@@ -285,10 +330,13 @@ export function rankCandidates({
       video.description,
       ...(vDetails?.snippet?.tags ?? []),
     ]);
+    // channel-level text is a stronger topic signal than one video's wording
     const channelText = termVector([
       cDetails?.snippet?.title,
       cDetails?.snippet?.description,
-    ], 1.5); // channel-level description is a stronger topic signal than one video
+      ...(USE_CHANNEL_TOPIC_SIGNALS ? topicCategoryTerms(cDetails) : []),
+      ...(USE_CHANNEL_TOPIC_SIGNALS ? channelKeywordTerms(cDetails) : []),
+    ], 1.5);
 
     const combinedVec = mergeVectors(videoText, channelText);
     const topicMatch = cosineSimilarity(profile.vector, combinedVec);
@@ -303,6 +351,22 @@ export function rankCandidates({
 
     return { video, cDetails, topicMatch, engagement, freshness, rawDiscover };
   });
+
+  // Pass 1.5: propagate topic match sideways across each channel. Runs
+  // before maxTopicMatch is taken so the relevance gate in pass 2 is
+  // measured against the propagated scores, not the pre-propagation ones.
+  if (USE_CHANNEL_TOPIC_PROPAGATION) {
+    const bestByChannel = new Map();
+    for (const p of partial) {
+      const prev = bestByChannel.get(p.video.channelId) ?? 0;
+      if (p.topicMatch > prev) bestByChannel.set(p.video.channelId, p.topicMatch);
+    }
+    for (const p of partial) {
+      const inherited =
+        (bestByChannel.get(p.video.channelId) ?? 0) * CHANNEL_TOPIC_INHERITANCE;
+      if (inherited > p.topicMatch) p.topicMatch = inherited;
+    }
+  }
 
   const maxTopicMatch = Math.max(0, ...partial.map((p) => p.topicMatch));
 

@@ -73,6 +73,12 @@ function isFormat(topic) {
   );
 }
 
+/** A topic naming a creator rather than a subject. Must stay in step with
+ *  isCreatorSeed() in backend/services/creatorGraph.js. */
+function isCreatorSeed(topic) {
+  return /^@[A-Za-z0-9._-]{2,}$/.test(String(topic).trim());
+}
+
 function joinNatural(list) {
   if (list.length <= 1) return list[0] ?? "";
   if (list.length === 2) return `${list[0]} and ${list[1]}`;
@@ -84,12 +90,22 @@ function joinNatural(list) {
  *  as "video essays on video games"; anything else is joined with "and", so
  *  two unrelated subjects stay "hiking and city life". */
 function combineTopics(topics) {
-  if (topics.length <= 1) return topics;
-  const [first, ...rest] = topics;
-  if (isFormat(first) && !rest.some(isFormat)) {
-    return [`${first} on ${joinNatural(rest)}`];
-  }
-  return [joinNatural(topics)];
+  // A creator seed ("@dishy") is an address, not a phrase, and the backend
+  // routes it down a different path entirely — merging it into prose would
+  // turn it back into an unmatchable text query. Seeds stay whole and stay
+  // separate; only the descriptive topics get combined.
+  const seeds = topics.filter(isCreatorSeed);
+  const subjects = topics.filter((t) => !isCreatorSeed(t));
+
+  if (subjects.length === 0) return seeds;
+  if (subjects.length === 1) return [...seeds, subjects[0]];
+
+  const [first, ...rest] = subjects;
+  const combined =
+    isFormat(first) && !rest.some(isFormat)
+      ? `${first} on ${joinNatural(rest)}`
+      : joinNatural(subjects);
+  return [...seeds, combined];
 }
 
 /** Starter chips drawn from the user's subscribed channel names, spaced out
@@ -327,9 +343,25 @@ export default function App() {
             <span id="find-hint" className="search-hint">
               {genres.length === 0
                 ? "Add at least one topic above to search."
-                : genres.length === 1
-                  ? "Searching 1 topic."
-                  : `Combining ${genres.length} topics into one search: “${combineTopics(genres)[0]}”.`}
+                : (() => {
+                    // Creator seeds are searched on their own, so the hint has
+                    // to count them separately from the merged topic phrase.
+                    const queries = combineTopics(genres);
+                    const seeds = genres.filter(isCreatorSeed);
+                    const phrase = queries.find((q) => !isCreatorSeed(q));
+                    const parts = [];
+                    if (seeds.length) {
+                      parts.push(
+                        `Finding creators like ${joinNatural(seeds)}`
+                      );
+                    }
+                    if (phrase) {
+                      parts.push(
+                        seeds.length ? `searching “${phrase}”` : `Searching “${phrase}”`
+                      );
+                    }
+                    return `${parts.join(", plus ")}.`;
+                  })()}
             </span>
           </div>
         </section>
