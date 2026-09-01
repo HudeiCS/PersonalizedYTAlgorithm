@@ -35,15 +35,16 @@ export default function DiscoverabilitySlider({ value, onChange }) {
             discoverability
           </label>
           {/* Typable shortcut for the slider. Styled to be indistinguishable
-              from the plain text it replaced; sized in ch so it never shifts
-              the row as the number's width changes. */}
+              from the plain text it replaced, and held at a fixed three-digit
+              width: sizing it to the current value made the whole heading
+              change width as the number went 5 -> 60 -> 100, which shoved the
+              track and the labels under it sideways while dragging. */}
           <span className="slider-value">
             <input
               type="text"
               inputMode="numeric"
               value={shown}
               aria-label="Discoverability percentage"
-              style={{ width: `${Math.max(shown.length, 1)}ch` }}
               onChange={(e) => setDraft(e.target.value.replace(/\D/g, "").slice(0, 3))}
               onFocus={(e) => e.target.select()}
               onBlur={commit}

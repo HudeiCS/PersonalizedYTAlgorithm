@@ -14,6 +14,26 @@ const AGE_OPTIONS = [
   { value: "year", label: "Past year" },
 ];
 
+/** A <select> sized to the option it is currently showing, rather than to its
+ *  widest option the way a native select is. The visible label is rendered a
+ *  second time as a hidden sizer stacked in the same grid cell; the cell takes
+ *  that width, and the select (appearance stripped, min-width released) fills
+ *  it. Without this the box stays as wide as "Past 24 hours" forever and the
+ *  arrow sits marooned against the far border. */
+function Select({ id, options, value, onChange }) {
+  const current = options.find((o) => o.value === value) ?? options[0];
+  return (
+    <span className="select-wrap">
+      <select id={id} value={value} onChange={onChange}>
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>{opt.label}</option>
+        ))}
+      </select>
+      <span className="select-sizer" aria-hidden="true">{current.label}</span>
+    </span>
+  );
+}
+
 export default function Filters({ value, onChange, showSubscriptionsToggle }) {
   function set(key, fieldValue) {
     onChange({ ...value, [key]: fieldValue });
@@ -28,28 +48,22 @@ export default function Filters({ value, onChange, showSubscriptionsToggle }) {
 
       <div className="filter-field">
         <label htmlFor="filter-duration">Duration</label>
-        <select
+        <Select
           id="filter-duration"
+          options={DURATION_OPTIONS}
           value={value.duration}
           onChange={(e) => set("duration", e.target.value)}
-        >
-          {DURATION_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
-          ))}
-        </select>
+        />
       </div>
 
       <div className="filter-field">
         <label htmlFor="filter-age">Uploaded</label>
-        <select
+        <Select
           id="filter-age"
+          options={AGE_OPTIONS}
           value={value.age}
           onChange={(e) => set("age", e.target.value)}
-        >
-          {AGE_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
-          ))}
-        </select>
+        />
       </div>
 
       <div className="filter-toggle">

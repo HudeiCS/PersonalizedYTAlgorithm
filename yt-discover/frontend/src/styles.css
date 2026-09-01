@@ -38,6 +38,14 @@
   --gold-wash: rgba(221, 164, 44, 0.16);
   --on-gold: #191204;
 
+  /* The primary button diverges between themes: on paper the bright fill
+     gold reads as a washed-out highlighter, so light mode fills it with the
+     deep brown the accent already uses for text and flips the label to
+     paper. Dark mode keeps the gold fill with a near-black label. */
+  --btn-fill: #714d0c;
+  --btn-fill-hover: #5a3d09;
+  --btn-label: #fcfbf7;
+
   --teal: #0e6360;
   --danger: #a81f18;
 
@@ -82,6 +90,10 @@
     --gold-wash: rgba(232, 179, 77, 0.12);
     --on-gold: #1a1305;
 
+    --btn-fill: #e8b34d;
+    --btn-fill-hover: #f0bf63;
+    --btn-label: #1a1305;
+
     --teal: #5fd4d0;
     --danger: #e98d8d;
 
@@ -110,6 +122,10 @@
   --gold-line: #a3813c;
   --gold-wash: rgba(232, 179, 77, 0.12);
   --on-gold: #1a1305;
+
+  --btn-fill: #e8b34d;
+  --btn-fill-hover: #f0bf63;
+  --btn-label: #1a1305;
 
   --teal: #5fd4d0;
   --danger: #e98d8d;
@@ -562,6 +578,9 @@ button {
   padding: 0;
   margin: 0;
   text-align: right;
+  /* Fixed at three digits so 5%, 60% and 100% all occupy the same space and
+     nothing downstream of the heading shifts as the slider moves. */
+  width: 3ch;
 }
 .slider-labels {
   display: flex;
@@ -601,15 +620,57 @@ button {
   letter-spacing: 0.04em;
   cursor: pointer;
 }
-.filter-field select {
-  background: var(--surface-raised);
-  border: 1px solid var(--border-strong);
-  color: var(--text);
+/* A select is always as wide as its widest option, which left the arrow
+   stranded against the far border whenever a shorter option was showing.
+   The hidden sizer holds the *current* label and is the only thing that
+   sizes the wrapper; the select is taken out of layout on top of it. Both
+   carry identical box metrics, so the overlaid text lines up exactly.
+   (Stacking them in a grid cell does not work: an auto track still sizes to
+   the select's max-content contribution, which is the widest option again.) */
+.select-wrap {
+  position: relative;
+  display: inline-block;
+}
+.select-wrap > select,
+.select-wrap > .select-sizer {
   font-family: var(--font-body);
   font-size: 13.5px;
-  padding: 8px 10px;
+  /* right padding is the chevron's column — it sets the text-to-arrow gap */
+  padding: 8px 26px 8px 10px;
+  border: 1px solid transparent;
 }
-.filter-field select:hover { border-color: var(--gold-line); }
+.select-wrap > .select-sizer {
+  display: block;
+  visibility: hidden;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.select-wrap > select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--surface-raised);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.select-wrap > select:hover { border-color: var(--gold-line); }
+/* Chevron drawn in CSS rather than a data-URI so it can use a theme token. */
+.select-wrap::after {
+  content: "";
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin-top: -5px;
+  border-right: 1.5px solid var(--text-muted);
+  border-bottom: 1.5px solid var(--text-muted);
+  transform: rotate(45deg);
+  pointer-events: none;
+}
 
 .filter-toggle {
   display: flex;
@@ -657,16 +718,17 @@ button {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  background: var(--gold);
-  color: var(--on-gold);
-  border: 1px solid var(--gold-line);
+  background: var(--btn-fill);
+  color: var(--btn-label);
+  border: 1px solid var(--btn-fill);
   font-weight: 600;
   font-size: 14.5px;
   padding: 12px 22px;
   transition: background 0.15s ease;
 }
 .btn-primary:hover {
-  background: var(--gold-hover);
+  background: var(--btn-fill-hover);
+  border-color: var(--btn-fill-hover);
 }
 .btn-primary:active { transform: scale(0.98); }
 .btn-primary:disabled { opacity: 0.5; cursor: default; }
@@ -1148,7 +1210,9 @@ button {
 
   .filter-field label,
   .filter-toggle { font-size: 12.5px; }
-  .filter-field select { font-size: 15px; padding: 10px 12px; }
+  /* select and sizer must keep identical metrics or the box mis-measures */
+  .select-wrap > select,
+  .select-wrap > .select-sizer { font-size: 15px; padding: 10px 28px 10px 12px; }
 
   .btn-primary { font-size: 16px; padding: 14px 26px; }
   .btn-ghost,
